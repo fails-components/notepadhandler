@@ -17,93 +17,131 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { createServer } from "http";
-import { Server } from "socket.io";
-import { createAdapter } from "@socket.io/redis-adapter";
-import * as redis  from "redis";
-import MongoClient from 'mongodb';
-import {NoteScreenConnection} from './notepadhandler.js';
-import {FailsJWTSigner,FailsJWTVerifier, FailsAssets} from 'fails-components-security';
-import {FailsConfig} from 'fails-components-config';
-import {CronJob} from 'cron';
+import { createServer } from 'http'
+import { Server } from 'socket.io'
+import { createAdapter } from '@socket.io/redis-adapter'
+import * as redis from 'redis'
+import MongoClient from 'mongodb'
+import { NoteScreenConnection } from './notepadhandler.js'
+import {
+  FailsJWTSigner,
+  FailsJWTVerifier,
+  FailsAssets
+} from 'fails-components-security'
+import { FailsConfig } from '@martenrichter/fails-components-config'
+import { CronJob } from 'cron'
 
-let cfg=new FailsConfig();
+const initServer = async () => {
+  const cfg = new FailsConfig()
 
-const redisclient = redis.createClient({detect_buffers: true /* required by notescreen connection*/});
+  const redisclient = redis.createClient({
+    detect_buffers: true /* required by notescreen connection */
+  })
 
-const redisclpub = redisclient.duplicate();
-const redisclsub = redisclient.duplicate();
+  const redisclpub = redisclient.duplicate()
+  const redisclsub = redisclient.duplicate()
 
-let mongoclient = await MongoClient.connect(cfg.getMongoURL(),{useNewUrlParser: true , useUnifiedTopology: true });
-let mongodb =mongoclient.db(cfg.getMongoDB()); 
+  const mongoclient = await MongoClient.connect(cfg.getMongoURL(), {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+  })
+  const mongodb = mongoclient.db(cfg.getMongoDB())
 
-const server = createServer();
+  const server = createServer()
 
+  const assets = new FailsAssets({
+    datadir: cfg.getDataDir(),
+    dataurl: cfg.getURL('data'),
+    webservertype: cfg.getWSType(),
+    privateKey: cfg.getStatSecret()
+  })
 
-let assets= new FailsAssets( { datadir: cfg.getDataDir(), dataurl: cfg.getURL('data'), webservertype: cfg.getWSType(), privateKey:  cfg.getStatSecret()});
+  const lecturesecurity = new FailsJWTSigner({
+    redis: redisclient,
+    type: 'lecture',
+    expiresIn: '10m',
+    secret: cfg.getKeysSecret()
+  })
+  const screensecurity = new FailsJWTSigner({
+    redis: redisclient,
+    type: 'screen',
+    expiresIn: '10m',
+    secret: cfg.getKeysSecret()
+  })
+  const lectureverifier = new FailsJWTVerifier({
+    redis: redisclient,
+    type: 'lecture'
+  })
+  const screenverifier = new FailsJWTVerifier({
+    redis: redisclient,
+    type: 'screen'
+  })
 
+  // may be move the io also inside the object, on the other hand, I can not insert middleware anymore
 
-let lecturesecurity=new FailsJWTSigner ({redis: redisclient, type: 'lecture', expiresIn: "10m", secret: cfg.getKeysSecret() });
-let screensecurity=new FailsJWTSigner ({redis: redisclient, type: 'screen', expiresIn: "10m", secret: cfg.getKeysSecret() });
-let lectureverifier= new FailsJWTVerifier({redis: redisclient, type: 'lecture'} );
-let screenverifier= new FailsJWTVerifier({redis: redisclient, type: 'screen'} );
+  let cors = null
 
+  if (cfg.needCors()) {
+    cors = {
+      origin: cfg.getURL('web'),
+      methods: ['GET', 'POST']
+      // credentials: true
+    }
+  }
 
+  const ioIns = new Server(server, { cors: cors })
+  const notepadio = ioIns.of('/notepads')
+  const screenio = ioIns.of('/screens')
+  const notesio = ioIns.of('/notes')
 
-// may be move the io also inside the object, on the other hand, I can not insert middleware anymore
+  ioIns.adapter(createAdapter(redisclpub, redisclsub))
 
-let cors=null;
+  const nsconn = new NoteScreenConnection({
+    redis: redisclient,
+    mongo: mongodb,
+    notepadio: notepadio,
+    screenio: screenio,
+    notesio: notesio,
+    signScreenJwt: screensecurity.signToken,
+    signNotepadJwt: lecturesecurity.signToken,
+    getFileURL: assets.getFileURL,
+    notepadhandlerURL: cfg.getURL('notepad'),
+    screenUrl: cfg.getURL('web'),
+    notepadUrl: cfg.getURL('web'),
+    notesUrl: cfg.getURL('web')
+  })
 
-if (cfg.needCors()) {
-  cors={
-    origin: cfg.getURL('web'),
-    methods: ["GET", "POST"],
-   // credentials: true
-  };
+  // eslint-disable-next-line no-unused-vars
+  const hkjob = new CronJob(
+    '35 * * * * *',
+    () => {
+      console.log('Start house keeping')
+      nsconn.houseKeeping()
+      console.log('End house keeping')
+    },
+    null,
+    true
+  ) // run it every minute
+
+  notepadio.use(lectureverifier.socketauthorize())
+  notepadio.on('connection', (socket) => {
+    nsconn.SocketHandlerNotepad.bind(nsconn, socket)()
+  })
+  screenio.use(screenverifier.socketauthorize())
+  screenio.on('connection', (socket) => {
+    nsconn.SocketHandlerScreen.bind(nsconn, socket)()
+  })
+
+  notesio.use((socket, next) => {
+    return next(new Error('no Connection possible'))
+  }) // this should not connect to notes
+
+  server.listen(cfg.getPort('notepad'), cfg.getHost(), function () {
+    console.log(
+      'Failsserver listening at http://%s:%s',
+      server.address().address,
+      server.address().port
+    )
+  })
 }
-
-var ioIns = new Server(server,{cors: cors});
-var notepadio = ioIns.of('/notepads');
-var screenio = ioIns.of('/screens');
-var notesio = ioIns.of('/notes');
-
-ioIns.adapter(createAdapter(redisclpub, redisclsub));
-
-
-
-
-var nsconn= new NoteScreenConnection({
-  redis: redisclient,
-  mongo: mongodb, 
-  notepadio: notepadio,
-  screenio: screenio,
-  notesio: notesio,
-  signScreenJwt: screensecurity.signToken,
-  signNotepadJwt: lecturesecurity.signToken,
-  getFileURL: assets.getFileURL,
-  notepadhandlerURL: cfg.getURL('notepad'),
-  screenUrl: cfg.getURL('web'),
-  notepadUrl: cfg.getURL('web'),
-  notesUrl: cfg.getURL('web')
-});
-
-var hkjob=new CronJob('35 * * * * *', ()=>{ 
-  console.log("Start house keeping");
-  nsconn.houseKeeping();
-  console.log("End house keeping");
-},null,true); // run it every minute
-
-
-notepadio.use( lectureverifier.socketauthorize());
-notepadio.on('connection',(socket)=>{nsconn.SocketHandlerNotepad.bind(nsconn,socket)();});
-screenio.use(screenverifier.socketauthorize());
-screenio.on('connection',(socket)=>{nsconn.SocketHandlerScreen.bind(nsconn,socket)();});
-
-notesio.use(()=>{return next(new Error("no Connection possible"));}); // this should not connect to notes
-
-
-server.listen(cfg.getPort('notepad'),cfg.getHost(),function() {
-    console.log('Failsserver listening at http://%s:%s',
-        server.address().address, server.address().port);
-      });
-
+initServer()
