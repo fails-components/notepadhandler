@@ -24,7 +24,7 @@ import {
   Collection,
   MemContainer,
   CallbackContainer
-} from '@martenrichter/fails-components-data'
+} from '@fails-components/data'
 import { v4 as uuidv4, validate as isUUID } from 'uuid'
 import Chance from 'chance'
 import { promisify } from 'util'

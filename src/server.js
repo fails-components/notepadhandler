@@ -28,7 +28,7 @@ import {
   FailsJWTVerifier,
   FailsAssets
 } from 'fails-components-security'
-import { FailsConfig } from '@martenrichter/fails-components-config'
+import { FailsConfig } from '@fails-components/config'
 import { CronJob } from 'cron'
 
 const initServer = async () => {
