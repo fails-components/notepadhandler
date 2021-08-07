@@ -894,7 +894,7 @@ export class NoteScreenConnection {
         await saveproms // wait before next iteration, do not use up to much mem
 
         cursor = scanret[0]
-      } while (cursor !== 0)
+      } while (cursor !== '0')
     } catch (error) {
       console.log('Error saveChangedLecture', error)
     }
@@ -1096,7 +1096,7 @@ export class NoteScreenConnection {
               lastaccessesp.push(...myprom2)
 
               cursor2 = scanret2[0]
-            } while (cursor2 !== 0)
+            } while (cursor2 !== '0')
 
             let laarr = await Promise.all(lastaccessesp)
             laarr = laarr.flat()
@@ -1115,14 +1115,14 @@ export class NoteScreenConnection {
                 console.log('purge element', pscanret)
                 pcursor = pscanret[0]
                 retprom.push(...pscanret[1].map((el2) => unlink(el2)))
-              } while (pcursor !== 0)
+              } while (pcursor !== '0')
             }
             return Promise.all(retprom)
           })
         )
         allprom.push(myprom)
         cursor = scanret[0]
-      } while (cursor !== 0)
+      } while (cursor !== '0')
       await Promise.all(allprom) // we are finished giving orders, wait for return
       return
     } catch (err) {
