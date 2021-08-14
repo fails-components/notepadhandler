@@ -43,7 +43,7 @@
     "dist"
   ],
   "dependencies": {
-    "@fails-components/config": ">=0.0.1",
+    "@fails-components/config": ">=0.0.2",
     "@fails-components/data": ">=0.0.0",
     "@fails-components/security": ">=0.0.1",
     "@socket.io/redis-adapter": "^7.0.0",
