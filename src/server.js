@@ -27,14 +27,14 @@ import {
   FailsJWTSigner,
   FailsJWTVerifier,
   FailsAssets
-} from 'fails-components-security'
+} from '@fails-components/security'
 import { FailsConfig } from '@fails-components/config'
 import { CronJob } from 'cron'
 
 const initServer = async () => {
   const cfg = new FailsConfig()
 
-  const redisclient = redis.createClient({
+  const redisclient = redis.createClient(cfg.redisPort(), cfg.redisHost(), {
     detect_buffers: true /* required by notescreen connection */
   })
 
@@ -89,7 +89,12 @@ const initServer = async () => {
     }
   }
 
-  const ioIns = new Server(server, { cors: cors })
+  const ioIns = new Server(server, {
+    cors: cors,
+    path: '/notepad.io',
+    serveClient: false
+  })
+
   const notepadio = ioIns.of('/notepads')
   const screenio = ioIns.of('/screens')
   const notesio = ioIns.of('/notes')
@@ -136,7 +141,10 @@ const initServer = async () => {
     return next(new Error('no Connection possible'))
   }) // this should not connect to notes
 
-  server.listen(cfg.getPort('notepad'), cfg.getHost(), function () {
+  let port = cfg.getPort('notepad')
+  if (port === 443) port = 8080 // we are in production mode inside a container
+
+  server.listen(port, cfg.getHost(), function () {
     console.log(
       'Failsserver listening at http://%s:%s',
       server.address().address,
