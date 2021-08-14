@@ -1,7 +1,7 @@
 FROM node:14
 
 ARG ENV
-ARG GH_TOKEN
+ARG GITHUB_TOKEN
 
 WORKDIR /usr/src/notepadhandler
 
