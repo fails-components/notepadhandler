@@ -11,8 +11,10 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    env:
+        DOCKER_BUILDKIT: 1
 
     steps:
     - uses: actions/checkout@v2
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --build-arg GH_TOKEN=${{ secrets.GITHUB_TOKEN }} --tag ghcr.io/fails-components/notepadhandler:$(date +%s)
+      run: export GH_TOKEN=${{ secrets.GITHUB_TOKEN }}; docker build . --file Dockerfile --secret id=GH_TOKEN  --tag ghcr.io/fails-components/notepadhandler:$(date +%s)
