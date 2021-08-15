@@ -29,7 +29,6 @@ import {
   FailsAssets
 } from '@fails-components/security'
 import { FailsConfig } from '@fails-components/config'
-import { CronJob } from 'cron'
 
 const initServer = async () => {
   const cfg = new FailsConfig()
@@ -115,18 +114,6 @@ const initServer = async () => {
     notepadUrl: cfg.getURL('web'),
     notesUrl: cfg.getURL('web')
   })
-
-  // eslint-disable-next-line no-unused-vars
-  const hkjob = new CronJob(
-    '35 * * * * *',
-    () => {
-      console.log('Start house keeping')
-      nsconn.houseKeeping()
-      console.log('End house keeping')
-    },
-    null,
-    true
-  ) // run it every minute
 
   notepadio.use(lectureverifier.socketauthorize())
   notepadio.on('connection', (socket) => {
