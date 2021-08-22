@@ -7,7 +7,7 @@ name: Docker
 
 on:
   schedule:
-    - cron: $cron-daily
+    - cron: '30 3,12 * * *'
   push:
     branches: [ $default-branch ]
     # Publish semver tags as releases.
@@ -61,5 +61,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          secrets: |
+            "GH_TOKEN=${{ secrets.GITHUB_TOKEN }}"
           
           
