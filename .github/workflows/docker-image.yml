@@ -17,4 +17,5 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Build the Docker image
-      run:  docker build . --file Dockerfile  --tag ghcr.io/fails-components/notepadhandler:$(date +%s)
+      run:  export GH_TOKEN=${{ secrets.GITHUB_TOKEN }}; docker build . --file Dockerfile --secret id=GH_TOKEN --tag ghcr.io/fails-components/notepadhandler:$(date +%s)
+      
