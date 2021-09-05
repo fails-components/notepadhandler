@@ -1368,7 +1368,7 @@ export class NoteScreenConnection {
       let toret = await screenret
       toret = toret.filter((el) =>
         el.lastaccess
-          ? Date.now() - el.lastaccess < 20 * 60 * 1000 && el.active !== 0
+          ? Date.now() - el.lastaccess < 20 * 60 * 1000 && el.active !== '0'
           : false
       )
       return toret
@@ -1448,7 +1448,7 @@ export class NoteScreenConnection {
           })) // .forEach((el)=>(console.log("prefilter",el,el.active ? (el.active-Date.now()))< 20*60*1000 : false)))
           .filter((el) =>
             el.lastaccess
-              ? Date.now() - el.lastaccess < 20 * 60 * 1000 && el.active !== 0
+              ? Date.now() - el.lastaccess < 20 * 60 * 1000 && el.active !== '0'
               : false
           ),
         type: el[2][0]
