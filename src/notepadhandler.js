@@ -75,15 +75,20 @@ export class NoteScreenConnection {
     // only lectureuuid
     const roomname = this.getRoomName(args.lectureuuid)
 
+    const presinfo = this.getPresentationinfo(args)
+
     const screens = this.getNoteScreens(args)
 
     const channelinfo = this.getChannelNoteScreens(args)
+
+    const readypresinfo = await presinfo
 
     const readyscreens = await screens
 
     console.log('avil notepadscreens', args.notescreenuuid, readyscreens)
     this.notepadio.to(roomname).emit('availscreens', { screens: readyscreens })
     this.screenio.to(roomname).emit('availscreens', { screens: readyscreens })
+    this.notesio.to(roomname).emit('presinfo', readypresinfo)
     const readychannels = await channelinfo
     console.log('channelinfo', readychannels)
 
@@ -1374,6 +1379,29 @@ export class NoteScreenConnection {
       return toret
     } catch (error) {
       console.log('error get Notescreen', error)
+      return null
+    }
+  }
+
+  async getPresentationinfo(args) {
+    const client = this.redis
+    const hmget = promisify(this.redis.hmget).bind(client)
+
+    try {
+      let lectprop = hmget(
+        'lecture:' + args.lectureuuid,
+        'casttoscreens',
+        'backgroundbw',
+        'showscreennumber'
+      )
+      lectprop = await lectprop
+      return {
+        casttoscreens: lectprop[0],
+        backgroundbw: lectprop[1],
+        showscreennumber: lectprop[2]
+      }
+    } catch (error) {
+      console.log('getPresentationinfo', error)
       return null
     }
   }
