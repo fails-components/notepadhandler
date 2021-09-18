@@ -817,8 +817,10 @@ export class NoteScreenConnection {
     const client = this.redis
     const set = promisify(this.redis.set).bind(client)
     // ok first thing, we have to create a salt and set it in redis!
-    const pollsalt = randomBytes(16).toString('base64') // the salt is absolutely confidential, everyone who knows it can spoil secrecy of polling!
+    const randBytes = promisify(randomBytes)
+
     try {
+      const pollsalt = (await randBytes(16)).toString('base64') // the salt is absolutely confidential, everyone who knows it can spoil secrecy of polling!
       set(
         'pollsalt:lecture:' + lectureuuid + ':poll:' + poll.id,
         pollsalt,
