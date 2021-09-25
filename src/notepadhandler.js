@@ -267,9 +267,15 @@ export class NoteScreenConnection {
 
         this.setLectureProperties(
           notepadscreenid,
-          cmd.casttoscreens === true,
-          cmd.backgroundbw === true,
-          cmd.showscreennumber === true
+          cmd.casttoscreens !== undefined
+            ? cmd.casttoscreens === true
+            : undefined,
+          cmd.backgroundbw !== undefined
+            ? cmd.backgroundbw === true
+            : undefined,
+          cmd.showscreennumber !== undefined
+            ? cmd.showscreennumber === true
+            : undefined
         )
 
         this.updateNoteScreen(notepadscreenid, cmd.scrollheight, 'notepad')
@@ -595,19 +601,23 @@ export class NoteScreenConnection {
 
   setLectureProperties(args, casttoscreens, backgroundbw, showscreennumber) {
     // console.log("sNs: lecture:"+args.lectureuuid+":notepad:"+args.notepaduuid);
-    this.redis.hmset(
-      'lecture:' + args.lectureuuid,
-      'casttoscreens',
-      casttoscreens,
-      'backgroundbw',
-      backgroundbw,
-      'showscreennumber',
-      showscreennumber,
-      () => {
-        // console.log("result sNS",err,res);
+    const tasks = []
+    if (casttoscreens !== undefined) {
+      tasks.push('casttoscreens')
+      tasks.push(casttoscreens)
+    }
+    if (backgroundbw !== undefined) {
+      tasks.push('backgroundbw')
+      tasks.push(backgroundbw)
+    }
+    if (showscreennumber !== undefined) {
+      tasks.push('showscreennumber')
+      tasks.push(showscreennumber)
+    }
+    if (tasks.length > 0)
+      this.redis.hmset('lecture:' + args.lectureuuid, tasks, () => {
         this.emitscreenlists(args)
-      }
-    )
+      })
     /* this.notepadisscreen = isscreen;
      this.notepadscrollheight = scrollheight;
      this.casttoscreens = casttoscreens;
