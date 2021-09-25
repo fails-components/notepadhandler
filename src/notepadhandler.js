@@ -68,7 +68,7 @@ export class NoteScreenConnection {
 
   lastaccess(uuid) {
     // TODO
-    console.log('lastaccess', uuid)
+    // console.log('lastaccess', uuid)
   }
 
   async emitscreenlists(args) {
@@ -85,12 +85,12 @@ export class NoteScreenConnection {
 
     const readyscreens = await screens
 
-    console.log('avil notepadscreens', args.notescreenuuid, readyscreens)
+    // console.log('avil notepadscreens', args.notescreenuuid, readyscreens)
     this.notepadio.to(roomname).emit('availscreens', { screens: readyscreens })
     this.screenio.to(roomname).emit('availscreens', { screens: readyscreens })
     this.notesio.to(roomname).emit('presinfo', readypresinfo)
     const readychannels = await channelinfo
-    console.log('channelinfo', readychannels)
+    // console.log('channelinfo', readychannels)
 
     this.notepadio.to(roomname).emit('channelinfo', readychannels)
     this.screenio.to(roomname).emit('channelinfo', readychannels)
@@ -110,7 +110,7 @@ export class NoteScreenConnection {
       console.log('Client username', socket.decoded_token.user.displayname)
     else console.log('no decoded token')
 
-    console.log('decoded token', socket.decoded_token)
+    // console.log('decoded token', socket.decoded_token)
 
     if (!isUUID(socket.decoded_token.lectureuuid)) {
       console.log('lectureuuid in decoded token invalid')
@@ -167,7 +167,7 @@ export class NoteScreenConnection {
 
           memcont.replaceStoredData(ab)
           const cs = memcont.getCurCommandState()
-          console.log('cs state', cs)
+          // console.log('cs state', cs)
           dispatcher.setTimeandScrollPos(cs.time, cs.scrollx, cs.scrolly)
           if (socket) {
             socket.emit('drawcommand', {
@@ -215,7 +215,7 @@ export class NoteScreenConnection {
     socket.on(
       'sendboards',
       function (cmd) {
-        console.log('notepad connected, send board data')
+        // console.log('notepad connected, send board data')
         this.sendBoardsToSocket(notepadscreenid.lectureuuid, socket)
         socket.emit('drawcommand', {
           task: 'scrollBoard',
@@ -252,7 +252,7 @@ export class NoteScreenConnection {
     )
 
     socket.on('createchannel', () => {
-      console.log('createchannel')
+      // console.log('createchannel')
       this.addNewChannel(
         notepadscreenid,
         'notebooks',
@@ -263,7 +263,7 @@ export class NoteScreenConnection {
     socket.on(
       'updatesizes',
       function (cmd) {
-        console.log('peek updatesizes', cmd)
+        // console.log('peek updatesizes', cmd)
 
         this.setLectureProperties(
           notepadscreenid,
@@ -365,13 +365,13 @@ export class NoteScreenConnection {
       'addnotescreentochannel',
       function (cmd) {
         // TODO new concept
-        console.log('check addnotescreen cmd', cmd)
+        // console.log('check addnotescreen cmd', cmd)
         if (isUUID(cmd.notescreenuuid) && isUUID(cmd.channeluuid)) {
-          console.log(
+          /* console.log(
             'addnotescreentochannel',
             cmd.notescreenuuid,
             cmd.channeluuid
-          )
+          ) */
           this.assignNoteScreenToChannel({
             channeluuid: cmd.channeluuid,
             lectureuuid: notepadscreenid.lectureuuid,
@@ -384,9 +384,9 @@ export class NoteScreenConnection {
     socket.on(
       'removechannel',
       function (cmd) {
-        console.log('removechannel', cmd)
+        // console.log('removechannel', cmd)
         if (isUUID(cmd.channeluuid)) {
-          console.log('removechannel request', cmd.channeluuid)
+          // console.log('removechannel request', cmd.channeluuid)
           this.removeChannel(notepadscreenid, cmd.channeluuid)
         }
       }.bind(this)
@@ -432,18 +432,18 @@ export class NoteScreenConnection {
 
     let curtoken = socket.decoded_token
 
-    console.log('screen connected')
+    // console.log('screen connected')
 
     // bIG TODO
     this.getLectDetail(purescreen, socket)
 
-    console.log('screen send board data')
+    // console.log('screen send board data')
     this.sendBoardsToSocket(purescreen.lectureuuid, socket)
     purescreen.roomname = this.getRoomName(purescreen.lectureuuid)
-    console.log(
+    /* console.log(
       'screen is connected to notepad, join room',
       purescreen.roomname
-    )
+    ) */
     socket.join(purescreen.roomname)
 
     /* } else {
@@ -496,7 +496,7 @@ export class NoteScreenConnection {
         if (purescreen) {
           if (purescreen.roomname) {
             socket.leave(purescreen.roomname)
-            console.log('screen disconnected leave room', purescreen.roomname)
+            // console.log('screen disconnected leave room', purescreen.roomname)
             purescreen.roomname = null
           }
           /* if (purescreen.socketid) {
@@ -625,7 +625,7 @@ export class NoteScreenConnection {
   }
 
   updateNoteScreen(args, scrollheight, purpose) {
-    console.log('update notescreen', scrollheight, purpose, args)
+    // console.log('update notescreen', scrollheight, purpose, args)
     this.redis.hmset(
       'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
       'scrollheight',
@@ -876,7 +876,7 @@ export class NoteScreenConnection {
 
     let lock = null
     try {
-      console.log(' try to lock ', 'lecture:' + lectureuuid + ':loadlock')
+      // console.log(' try to lock ', 'lecture:' + lectureuuid + ':loadlock')
       lock = await this.redlock.lock(
         'lecture:' + lectureuuid + ':loadlock',
         2000
@@ -905,7 +905,7 @@ export class NoteScreenConnection {
       const boardsavetime = lecturedoc.boardsavetime
       const backgroundbw = lecturedoc.backgroundbw
       lastwrite = await lastwrite
-      console.log('lastwrite', lastwrite, boardsavetime, lecturedoc)
+      // console.log('lastwrite', lastwrite, boardsavetime, lecturedoc)
 
       if (!boardsavetime) {
         lock.unlock()
@@ -936,7 +936,7 @@ export class NoteScreenConnection {
         )
         redisprom.push(myprom)
       }
-      console.log('cursor it finished')
+      // console.log('cursor it finished')
       await Promise.all(redisprom) // ok wait that everything is transfered and then update the time
       if (boards.length > 0)
         await sadd('lecture:' + lectureuuid + ':boards', boards)
@@ -974,12 +974,12 @@ export class NoteScreenConnection {
         // TODO sync to mongodb
         if (err) console.log('boards in sendBoardsToSocket picture', err)
         else {
-          console.log('boards', res, 'lecture:' + lectureuuid + ':boards')
+          // console.log('boards', res, 'lecture:' + lectureuuid + ':boards')
           const length = res.length
           let countdown = length
           for (const index in res) {
             const boardnum = res[index]
-            console.log('sendBoardsToSocket', boardnum, lectureuuid)
+            // console.log('sendBoardsToSocket', boardnum, lectureuuid)
             this.redis.get(
               Buffer.from('lecture:' + lectureuuid + ':board' + boardnum),
               function (err2, res2) {
@@ -1030,7 +1030,7 @@ export class NoteScreenConnection {
     emitscreens // notebooks or screencast
   ) {
     const newuuid = uuidv4()
-    console.log('addnewchannel')
+    // console.log('addnewchannel')
     this.redis
       .multi()
       .lrem('lecture:' + args.lectureuuid + ':channels', 0, newuuid)
@@ -1133,13 +1133,13 @@ export class NoteScreenConnection {
           ])
         })
       )
-      console.log('todelete', todelete)
+      // console.log('todelete', todelete)
       todelete = todelete
         .filter((el) =>
           el[1] ? Date.now() - el[1][1] > 20 * 60 * 1000 : false
         ) // inverted active condition
         .map((el) => el[0])
-      console.log('todelete filter', todelete)
+      // console.log('todelete filter', todelete)
       if (todelete.length === 0) return // we are ready
 
       // now we have the list of notescreens for potential deletion, we have to watch all these recprds and check it again
@@ -1178,7 +1178,7 @@ export class NoteScreenConnection {
       const channelwatch = channels.map(
         (el) => 'lecture:' + args.lectureuuid + ':channel:' + el + ':members'
       )
-      console.log('channelwatch', channelwatch)
+      // console.log('channelwatch', channelwatch)
 
       if (channelwatch.length > 0) this.redis.watch(channelwatch) // also watch the channelmembers
       // now we are sure they are for deletion start the multi
@@ -1205,7 +1205,7 @@ export class NoteScreenConnection {
   }
 
   connectNotescreen(args) {
-    console.log('connectnotepads', args)
+    // console.log('connectnotepads', args)
     this.lastaccess(args.lectureuuid)
     this.redis
       .multi()
@@ -1235,7 +1235,7 @@ export class NoteScreenConnection {
           let channel
           if (res) {
             channel = res
-            console.log('already have channel', res)
+            // console.log('already have channel', res)
             this.redis
               .multi()
               .lrem(
@@ -1265,11 +1265,11 @@ export class NoteScreenConnection {
               1,
               (err, res) => {
                 if (!err) channel = res[0]
-                console.log('channel 1', channel)
+                // console.log('channel 1', channel)
                 if (!channel) {
                   channel = this.addNewChannel(args, 'notebooks')
                 }
-                console.log('channel 2', channel)
+                // console.log('channel 2', channel)
                 this.redis
                   .multi()
                   .hset(
@@ -1361,7 +1361,7 @@ export class NoteScreenConnection {
       const screens = await smembers(
         'lecture:' + args.lectureuuid + ':notescreens'
       )
-      console.log('our screens', screens)
+      // console.log('our screens', screens)
       const screenret = Promise.all(
         screens.map(async (el, ind) => {
           const temp = await hmget(
@@ -1494,7 +1494,7 @@ export class NoteScreenConnection {
         type: el[2][0]
       }))
       lectprop = await lectprop
-      console.log('channellayout', toret)
+      // console.log('channellayout', toret)
       return {
         channelinfo: toret,
         casttoscreens: lectprop[0],
@@ -1508,7 +1508,7 @@ export class NoteScreenConnection {
   }
 
   assignNoteScreenToChannel(args) {
-    console.log('assignNotePadToChannel', args)
+    // console.log('assignNotePadToChannel', args)
     try {
       // TODO get content of old channel
       this.redis.watch(
