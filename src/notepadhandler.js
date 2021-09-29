@@ -650,6 +650,8 @@ export class NoteScreenConnection {
       )
       // console.log("lecturedoc",lecturedoc);
 
+      if (!lecturedoc.pictures) return []
+
       return lecturedoc.pictures.map((el) => {
         return {
           name: el.name,
