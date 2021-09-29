@@ -759,8 +759,8 @@ export class NoteScreenConnection {
           name: el.name,
           mimetype: el.mimetype,
           sha: el.sha.buffer.toString('hex'),
-          url: this.getFileURL(el.sha.buffer),
-          urlthumb: this.getFileURL(el.tsha.buffer)
+          url: this.getFileURL(el.sha.buffer, el.mimetype),
+          urlthumb: this.getFileURL(el.tsha.buffer, el.mimetype)
         }
       })
     } catch (err) {
