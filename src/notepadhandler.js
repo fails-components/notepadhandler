@@ -1226,6 +1226,8 @@ export class NoteScreenConnection {
         /* todo may be we have to add an instance id */
       )
       .exec()
+    let push = 'lpush'
+    if (args.purpose === 'screen') push = 'rpush'
 
     this.redis.hget(
       'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
@@ -1249,7 +1251,7 @@ export class NoteScreenConnection {
                 0,
                 args.notescreenuuid
               )
-              .lpush(
+              [push](
                 'lecture:' +
                   args.lectureuuid +
                   ':channel:' +
@@ -1291,7 +1293,7 @@ export class NoteScreenConnection {
                     0,
                     args.notescreenuuid
                   )
-                  .lpush(
+                  [push](
                     'lecture:' +
                       args.lectureuuid +
                       ':channel:' +
