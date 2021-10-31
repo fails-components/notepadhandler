@@ -979,6 +979,7 @@ export class NoteScreenConnection {
           // console.log('boards', res, 'lecture:' + lectureuuid + ':boards')
           const length = res.length
           let countdown = length
+          if (length === 0) socket.emit('reloadBoard', { last: true })
           for (const index in res) {
             const boardnum = res[index]
             // console.log('sendBoardsToSocket', boardnum, lectureuuid)
