@@ -44,7 +44,7 @@
   ],
   "dependencies": {
     "@fails-components/config": ">=0.0.5",
-    "@fails-components/data": ">=0.0.5",
+    "@fails-components/data": ">=0.0.7",
     "@fails-components/security": "0.0.3",
     "@socket.io/redis-adapter": "^7.0.0",
     "chance": "^1.1.8",

@@ -602,15 +602,15 @@ export class NoteScreenConnection {
   setLectureProperties(args, casttoscreens, backgroundbw, showscreennumber) {
     // console.log("sNs: lecture:"+args.lectureuuid+":notepad:"+args.notepaduuid);
     const tasks = []
-    if (casttoscreens !== undefined) {
+    if (casttoscreens !== undefined && casttoscreens !== null) {
       tasks.push('casttoscreens')
       tasks.push(casttoscreens)
     }
-    if (backgroundbw !== undefined) {
+    if (backgroundbw !== undefined && backgroundbw !== null) {
       tasks.push('backgroundbw')
       tasks.push(backgroundbw)
     }
-    if (showscreennumber !== undefined) {
+    if (showscreennumber !== undefined && showscreennumber !== null) {
       tasks.push('showscreennumber')
       tasks.push(showscreennumber)
     }
