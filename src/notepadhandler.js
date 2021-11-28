@@ -320,6 +320,9 @@ export class NoteScreenConnection {
       'drawcommand',
       async function (cmd) {
         const delayed = false
+        if (notepadscreenid) {
+          networksource.receiveData(cmd)
+        }
         // special handling
         if (cmd.task === 'addPicture') {
           if (notepadscreenid) {
@@ -342,10 +345,6 @@ export class NoteScreenConnection {
           this.notepadio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
           this.screenio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
           this.notesio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
-        }
-
-        if (notepadscreenid) {
-          networksource.receiveData(cmd)
         }
       }.bind(this)
     )
