@@ -44,13 +44,12 @@
   "dependencies": {
     "@fails-components/config": "^1.0.0-rc.3",
     "@fails-components/data": "^1.0.0-rc.2",
-    "@fails-components/security": "^1.0.0-rc.6",
-    "@socket.io/redis-adapter": "^7.0.0",
-    "chance": "^1.1.8",
+    "@fails-components/security": "^1.0.0-rc.11",
+    "@socket.io/redis-adapter": "^7.1.0",
     "jsonwebtoken": "^8.5.1",
     "mongodb": "^3.7.3",
     "performance-now": "^2.1.0",
-    "redis": "^3.1.2",
+    "redis": "^4.0.1",
     "redlock": "^4.2.0",
     "socket.io": "^4.3.1",
     "uuid": "^8.3.2"

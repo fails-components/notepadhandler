@@ -31,15 +31,23 @@ import {
 import { FailsConfig } from '@fails-components/config'
 
 const initServer = async () => {
+  console.log('Starting notepadhandler')
   const cfg = new FailsConfig()
 
-  const redisclient = redis.createClient(cfg.redisPort(), cfg.redisHost(), {
-    detect_buffers: true /* required by notescreen connection */,
+  const redisclient = redis.createClient({
+    socket: { port: cfg.redisPort(), host: cfg.redisHost() },
     password: cfg.redisPass()
   })
 
+  await redisclient.connect()
+  console.log('redisclient connected')
+
   const redisclpub = redisclient.duplicate()
   const redisclsub = redisclient.duplicate()
+
+  await Promise.all([redisclpub.connect(), redisclsub.connect()])
+
+  console.log('redisclient pub sub connected')
 
   const mongoclient = await MongoClient.connect(cfg.getMongoURL(), {
     useNewUrlParser: true,

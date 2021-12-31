@@ -22,16 +22,15 @@ import {
   NetworkSource,
   Dispatcher,
   Collection,
-  MemContainer,
+  /*  MemContainer, */
   CallbackContainer
 } from '@fails-components/data'
 import { v4 as uuidv4, validate as isUUID } from 'uuid'
-import Chance from 'chance'
 import { promisify } from 'util'
 import Redlock from 'redlock'
 import { randomBytes } from 'crypto'
-
-const chance = new Chance()
+import { RedisRedlockProxy } from '@fails-components/security'
+import { commandOptions } from 'redis'
 
 export class NoteScreenConnection {
   constructor(args) {
@@ -50,7 +49,7 @@ export class NoteScreenConnection {
 
     this.notepadhandlerURL = args.notepadhandlerURL
 
-    this.redlock = new Redlock([this.redis], {
+    this.redlock = new Redlock([RedisRedlockProxy(this.redis)], {
       driftFactor: 0.01, // multiplied by lock ttl to determine drift time
 
       retryCount: 10,
@@ -152,6 +151,8 @@ export class NoteScreenConnection {
 
     const networksource = new NetworkSource(dispatcher)
 
+    // should be handled by client, really
+    /*
     this.redis.get(
       Buffer.from('lecture:' + notepadscreenid.lectureuuid + ':boardcommand'),
       function (err, res) {
@@ -162,7 +163,7 @@ export class NoteScreenConnection {
         var view = new Uint8Array(ab);
         for (var i = 0; i < res.length; i++) {
           view[i] = res[i];
-        } */
+        } *
           const ab = res
 
           memcont.replaceStoredData(ab)
@@ -181,6 +182,7 @@ export class NoteScreenConnection {
         }
       }
     )
+    */
     /* if (notepadscreenid) {
        //notepadscreen.socket=socket;
        //notepadscreen.lecture.failsdata=true; // we have started giving a lecture
@@ -514,13 +516,9 @@ export class NoteScreenConnection {
       lectureuuid: notepadscreenid.lectureuuid,
       notescreenuuid: uuidv4(),
       purpose: 'screen',
-      color: chance.color(),
       notepadhandler: this.notepadhandlerURL,
       maxrenew: maxrenew,
-      name:
-        chance.profession({ rank: true }) +
-        ' of ' +
-        chance.country({ full: true })
+      name: 'Created from lecture'
     }
     return await this.signScreenJwt(content)
   }
@@ -550,21 +548,21 @@ export class NoteScreenConnection {
     }
     if (!oldtoken.maxrenew || !(oldtoken.maxrenew > 0))
       return { error: 'maxrenew token failed', oldtoken: oldtoken }
-    this.redis.hmset(
-      'lecture:' +
-        oldtoken.lectureuuid +
-        ':notescreen:' +
-        oldtoken.notescreenuuid,
-      'active',
-      1,
-      'lastaccess',
-      Date.now()
-    )
-    this.redis.hmset(
-      'lecture:' + oldtoken.lectureuuid,
-      'lastaccess',
-      Date.now()
-    )
+    try {
+      this.redis.hSet(
+        'lecture:' +
+          oldtoken.lectureuuid +
+          ':notescreen:' +
+          oldtoken.notescreenuuid,
+        ['active', '1', 'lastaccess', Date.now().toString()]
+      )
+      this.redis.hSet('lecture:' + oldtoken.lectureuuid, [
+        'lastaccess',
+        Date.now().toString()
+      ])
+    } catch (error) {
+      console.log('redis problem in getScreenToken', error)
+    }
     return { token: await this.signScreenJwt(newtoken), decoded: newtoken }
   }
 
@@ -580,61 +578,68 @@ export class NoteScreenConnection {
     }
     if (!oldtoken.maxrenew || !(oldtoken.maxrenew > 0))
       return { error: 'maxrenew token failed', oldtoken: oldtoken }
-    this.redis.hmset(
-      'lecture:' +
-        oldtoken.lectureuuid +
-        ':notescreen:' +
-        oldtoken.notescreenuuid,
-      'active',
-      1,
-      'lastaccess',
-      Date.now()
-    )
-    this.redis.hmset(
-      'lecture:' + oldtoken.lectureuuid,
-      'lastaccess',
-      Date.now()
-    )
+    try {
+      this.redis.hSet(
+        'lecture:' +
+          oldtoken.lectureuuid +
+          ':notescreen:' +
+          oldtoken.notescreenuuid,
+        ['active', '1', 'lastaccess', Date.now().toString()]
+      )
+      this.redis.hSet('lecture:' + oldtoken.lectureuuid, [
+        'lastaccess',
+        Date.now().toString()
+      ])
+    } catch (error) {
+      console.log('redis problem in getNotepadToken', error)
+    }
     return { token: await this.signNotepadJwt(newtoken), decoded: newtoken }
   }
 
-  setLectureProperties(args, casttoscreens, backgroundbw, showscreennumber) {
+  async setLectureProperties(
+    args,
+    casttoscreens,
+    backgroundbw,
+    showscreennumber
+  ) {
     // console.log("sNs: lecture:"+args.lectureuuid+":notepad:"+args.notepaduuid);
     const tasks = []
     if (casttoscreens !== undefined && casttoscreens !== null) {
       tasks.push('casttoscreens')
-      tasks.push(casttoscreens)
+      tasks.push(casttoscreens.toString())
     }
     if (backgroundbw !== undefined && backgroundbw !== null) {
       tasks.push('backgroundbw')
-      tasks.push(backgroundbw)
+      tasks.push(backgroundbw.toString())
     }
     if (showscreennumber !== undefined && showscreennumber !== null) {
       tasks.push('showscreennumber')
-      tasks.push(showscreennumber)
+      tasks.push(showscreennumber.toString())
     }
     if (tasks.length > 0)
-      this.redis.hmset('lecture:' + args.lectureuuid, tasks, () => {
+      try {
+        await this.redis.hSet('lecture:' + args.lectureuuid, tasks)
         this.emitscreenlists(args)
-      })
+      } catch (error) {
+        console.log('redis error in setLectureProperties', error)
+      }
     /* this.notepadisscreen = isscreen;
      this.notepadscrollheight = scrollheight;
      this.casttoscreens = casttoscreens;
      this.backgroundbw = backgroundbw; */
   }
 
-  updateNoteScreen(args, scrollheight, purpose) {
+  async updateNoteScreen(args, scrollheight, purpose) {
     // console.log('update notescreen', scrollheight, purpose, args)
-    this.redis.hmset(
-      'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
-      'scrollheight',
-      scrollheight,
-      'purpose',
-      purpose,
-      function () {
-        this.emitscreenlists(args)
-      }.bind(this)
-    )
+    try {
+      await this.redis.hSet(
+        'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
+        ['scrollheight', scrollheight.toString(), 'purpose', purpose]
+      )
+      this.emitscreenlists(args)
+    } catch (error) {
+      console.log('problem in updateNoteScreen', error)
+    }
   }
 
   async getAvailablePicts(notepadscreenid) {
@@ -763,7 +768,7 @@ export class NoteScreenConnection {
           url: this.getFileURL(el.sha.buffer, el.mimetype),
           urlthumb: this.getFileURL(el.tsha.buffer, el.mimetype)
         }
-      })
+      }, this)
     } catch (err) {
       console.log('error in getPicture', err)
     }
@@ -825,18 +830,15 @@ export class NoteScreenConnection {
 
   async startPoll(lectureuuid, poll) {
     const roomname = this.getRoomName(lectureuuid)
-    const client = this.redis
-    const set = promisify(this.redis.set).bind(client)
     // ok first thing, we have to create a salt and set it in redis!
     const randBytes = promisify(randomBytes)
 
     try {
       const pollsalt = (await randBytes(16)).toString('base64') // the salt is absolutely confidential, everyone who knows it can spoil secrecy of polling!
-      set(
+      this.redis.set(
         'pollsalt:lecture:' + lectureuuid + ':poll:' + poll.id,
         pollsalt,
-        'EX',
-        10 * 60 /* 10 Minutes for polling */
+        { EX: 10 * 60 /* 10 Minutes for polling */ }
       ) // after the pollsalt is gone, the poll is over!
       this.notepadio.to(roomname).emit('startPoll', poll)
       this.notesio.to(roomname).emit('startPoll', poll)
@@ -847,12 +849,10 @@ export class NoteScreenConnection {
 
   async finishPoll(lectureuuid, data) {
     const roomname = this.getRoomName(lectureuuid)
-    const client = this.redis
-    const del = promisify(this.redis.del).bind(client)
     // ok first thing, we have to create a salt and set it in redis!
 
     try {
-      del('pollsalt:lecture:' + lectureuuid + ':poll:' + data.pollid) // after the pollsalt is gone, the poll is over!
+      this.redis.del('pollsalt:lecture:' + lectureuuid + ':poll:' + data.pollid) // after the pollsalt is gone, the poll is over!
       const res = data.result
         .filter((el) => /^[0-9a-zA-Z]{9}$/.test(el.id))
         .map((el) => ({ id: el.id, data: el.data, name: el.name }))
@@ -868,11 +868,6 @@ export class NoteScreenConnection {
   }
 
   async loadLectFromDB(lectureuuid) {
-    const client = this.redis
-    const hget = promisify(this.redis.hget).bind(client)
-    const hmset = promisify(this.redis.hmset).bind(client)
-    const set = promisify(this.redis.set).bind(client)
-    const sadd = promisify(this.redis.sadd).bind(client)
     const boardprefix = 'lecture:' + lectureuuid + ':board'
 
     let lock = null
@@ -885,7 +880,7 @@ export class NoteScreenConnection {
       const lecturescol = this.mongo.collection('lectures')
       const boardscol = this.mongo.collection('lectureboards')
 
-      let lastwrite = hget('lecture:' + lectureuuid, 'lastwrite')
+      let lastwrite = this.redis.hGet('lecture:' + lectureuuid, 'lastwrite')
       const lecturedoc = await lecturescol.findOne(
         { uuid: lectureuuid },
         {
@@ -931,7 +926,7 @@ export class NoteScreenConnection {
         // ok we have one document so push it to redis, TODO think of sending the documents directly to clients?
         if (!boardinfo.board || !boardinfo.boarddata) continue // no valid data
         boards.push(boardinfo.board)
-        const myprom = set(
+        const myprom = this.redis.set(
           boardprefix + boardinfo.board,
           boardinfo.boarddata.buffer
         )
@@ -940,14 +935,13 @@ export class NoteScreenConnection {
       // console.log('cursor it finished')
       await Promise.all(redisprom) // ok wait that everything is transfered and then update the time
       if (boards.length > 0)
-        await sadd('lecture:' + lectureuuid + ':boards', boards)
-      await hmset(
-        'lecture:' + lectureuuid,
+        await this.redis.sAdd('lecture:' + lectureuuid + ':boards', boards)
+      await this.redis.hSet('lecture:' + lectureuuid, [
         'lastwrite',
-        boardsavetime,
+        boardsavetime && boardsavetime.toString(),
         'backgroundbw',
-        backgroundbw
-      )
+        backgroundbw && backgroundbw.toString()
+      ])
       console.log('loadLectFromDB successful for lecture', lectureuuid)
       lock.unlock()
     } catch (err) {
@@ -969,54 +963,67 @@ export class NoteScreenConnection {
       socket.emit('bgpdfinfo', { none: true })
     }
 
-    this.redis.smembers(
-      'lecture:' + lectureuuid + ':boards',
-      function (err, res) {
-        // TODO sync to mongodb
-        if (err) console.log('boards in sendBoardsToSocket picture', err)
-        else {
-          // console.log('boards', res, 'lecture:' + lectureuuid + ':boards')
-          const length = res.length
-          let countdown = length
-          if (length === 0) socket.emit('reloadBoard', { last: true })
-          for (const index in res) {
-            const boardnum = res[index]
-            // console.log('sendBoardsToSocket', boardnum, lectureuuid)
-            this.redis.get(
-              Buffer.from('lecture:' + lectureuuid + ':board' + boardnum),
-              function (err2, res2) {
-                if (err2)
-                  console.log('get board in sendBoardsToSocket picture', err2)
-                countdown--
-                // console.log("send reloadboard",boardnum,res2,length);
-                const send = {
-                  number: boardnum,
-                  data: res2,
-                  last: countdown === 0
-                }
-                socket.emit('reloadBoard', send)
-              }
+    try {
+      const res = await this.redis.sMembers(
+        'lecture:' + lectureuuid + ':boards'
+      )
+
+      // console.log('boards', res, 'lecture:' + lectureuuid + ':boards')
+      const length = res.length
+      let countdown = length
+      if (length === 0) socket.emit('reloadBoard', { last: true })
+      for (const index in res) {
+        const boardnum = res[index]
+        // console.log('sendBoardsToSocket', boardnum, lectureuuid)
+        try {
+          let res2
+          if (this.redis.getBuffer)
+            // required for v 4.0.0, remove later
+            res2 = await this.redis.getBuffer(
+              'lecture:' + lectureuuid + ':board' + boardnum
             )
+          // future api
+          else
+            res2 = await this.redis.get(
+              commandOptions({ returnBuffers: true }),
+              'lecture:' + lectureuuid + ':board' + boardnum
+            )
+
+          countdown--
+          // console.log('send reloadboard', boardnum, res2, length)
+          const send = {
+            number: boardnum,
+            data: res2,
+            last: countdown === 0
           }
+          socket.emit('reloadBoard', send)
+        } catch (error) {
+          console.log('error in sendboard to sockets loop', error)
         }
-      }.bind(this)
-    )
+      }
+    } catch (error) {
+      console.log('error in sendboard to sockets', error)
+    }
   }
 
-  writeData(lectureuuid, number, data, append) {
+  async writeData(lectureuuid, number, data, append) {
     // TODO check mongo db
     if (append) {
       // if (!number) console.log("number not defined", number);
-      this.redis.sadd('lecture:' + lectureuuid + ':boards', number)
-      this.redis.hmset('lecture:' + lectureuuid, 'lastwrite', Date.now())
+      try {
+        this.redis.sAdd('lecture:' + lectureuuid + ':boards', number.toString())
+        this.redis.hSet('lecture:' + lectureuuid, [
+          'lastwrite',
+          Date.now().toString()
+        ])
 
-      this.redis.append(
-        'lecture:' + lectureuuid + ':board' + number,
-        Buffer.from(new Uint8Array(data)),
-        function (error, res) {
-          if (error) console.log('Error appending data ' + lectureuuid, error)
-        }
-      )
+        await this.redis.append(
+          'lecture:' + lectureuuid + ':board' + number,
+          Buffer.from(new Uint8Array(data))
+        )
+      } catch (error) {
+        console.log('problem in writing data ' + lectureuuid, error)
+      }
     } else {
       console.log('Warning! Attempt to write data in non append mode!')
     }
@@ -1026,25 +1033,27 @@ export class NoteScreenConnection {
     return uuid
   }
 
-  addNewChannel(
+  async addNewChannel(
     args,
     type,
     emitscreens // notebooks or screencast
   ) {
     const newuuid = uuidv4()
     // console.log('addnewchannel')
-    this.redis
-      .multi()
-      .lrem('lecture:' + args.lectureuuid + ':channels', 0, newuuid)
-      .rpush('lecture:' + args.lectureuuid + ':channels', newuuid)
-      .hmset(
-        'lecture:' + args.lectureuuid + ':channel:' + newuuid,
-        'type',
-        type
-      )
-      .exec(() => {
-        if (emitscreens) this.emitscreenlists(args)
-      })
+    try {
+      await this.redis
+        .multi()
+        .lRem('lecture:' + args.lectureuuid + ':channels', 0, newuuid)
+        .rPush('lecture:' + args.lectureuuid + ':channels', newuuid)
+        .hSet('lecture:' + args.lectureuuid + ':channel:' + newuuid, [
+          'type',
+          type
+        ])
+        .exec()
+      if (emitscreens) this.emitscreenlists(args)
+    } catch (error) {
+      console.log('problem add new channel', error)
+    }
 
     return newuuid
   }
@@ -1052,19 +1061,15 @@ export class NoteScreenConnection {
   async removeChannel(args, channeluuid) {
     await this.cleanupNotescreens(args)
 
-    const client = this.redis
-    const hget = promisify(this.redis.hget).bind(client)
-    const llen = promisify(this.redis.llen).bind(client)
-
     try {
-      const targetchanneluuid = await hget(
+      const targetchanneluuid = await this.redis.hGet(
         'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
         'channel'
       )
       if (channeluuid === targetchanneluuid)
         console.log('tried to remove primary channel')
 
-      this.redis.watch(
+      await this.redis.watch([
         'lecture:' + args.lectureuuid + ':channel:' + channeluuid,
         'lecture:' + args.lectureuuid + ':channel:' + channeluuid + ':members',
         'lecture:' +
@@ -1073,16 +1078,16 @@ export class NoteScreenConnection {
           targetchanneluuid +
           ':members',
         'lecture:' + args.lectureuuid + ':channels'
-      )
+      ])
 
-      const memberslength = await llen(
+      const memberslength = await this.redis.lLen(
         'lecture:' + args.lectureuuid + ':channel:' + channeluuid + ':members'
       )
 
       const multi = this.redis.multi()
 
       for (let i = 0; i < memberslength; i++)
-        multi.lmove(
+        multi.lMove(
           'lecture:' +
             args.lectureuuid +
             ':channel:' +
@@ -1099,12 +1104,10 @@ export class NoteScreenConnection {
         .del(
           'lecture:' + args.lectureuuid + ':channel:' + channeluuid + ':members'
         )
-        .lrem('lecture:' + args.lectureuuid + ':channels', 0, channeluuid)
+        .lRem('lecture:' + args.lectureuuid + ':channels', 0, channeluuid)
         .del('lecture:' + args.lectureuuid + ':channel:' + channeluuid)
 
-      const exec = promisify(multi.exec).bind(multi)
-
-      await exec()
+      await multi.exec()
     } catch (error) {
       console.log('removeChannel error', error)
     }
@@ -1113,12 +1116,8 @@ export class NoteScreenConnection {
 
   async cleanupNotescreens(args) {
     // ok first we need a list of notescreens
-    const client = this.redis
-    const smembers = promisify(this.redis.smembers).bind(client)
-    const hmget = promisify(this.redis.hmget).bind(client)
-    const lrange = promisify(this.redis.lrange).bind(client)
     try {
-      const allscreens = await smembers(
+      const allscreens = await this.redis.sMembers(
         'lecture:' + args.lectureuuid + ':notescreens'
       )
       // now we collect the active status of all member
@@ -1127,13 +1126,12 @@ export class NoteScreenConnection {
           // ok we got the uuid
           return Promise.all([
             el,
-            hmget(
+            this.redis.hmGet(
               'lecture:' + args.lectureuuid + ':notescreen:' + el,
-              'active',
-              'lastaccess'
+              ['active', 'lastaccess']
             )
           ])
-        })
+        }, this)
       )
       // console.log('todelete', todelete)
       todelete = todelete
@@ -1148,21 +1146,20 @@ export class NoteScreenConnection {
       const towatch = todelete.map(
         (el) => 'lecture:' + args.lectureuuid + ':notescreen:' + el
       )
-      // console.log("towatch",towatch);
-      this.redis.watch(towatch) // we do not need a promise here, now again check what is going on
+      // console.log('towatch', towatch)
+      await this.redis.watch(towatch)
 
       let todelete2 = await Promise.all(
         todelete.map((el) => {
           // ok we got the uuid
           return Promise.all([
             el,
-            hmget(
+            this.redis.hmGet(
               'lecture:' + args.lectureuuid + ':notescreen:' + el,
-              'active',
-              'lastaccess'
+              ['active', 'lastaccess']
             )
           ])
-        })
+        }, this)
       )
       todelete2 = todelete2
         .filter((el) =>
@@ -1171,7 +1168,7 @@ export class NoteScreenConnection {
         .map((el) => el[0])
       if (todelete2.length === 0) return // we are ready
 
-      const channels = await lrange(
+      const channels = await this.redis.lRange(
         'lecture:' + args.lectureuuid + ':channels',
         0,
         -1
@@ -1182,7 +1179,7 @@ export class NoteScreenConnection {
       )
       // console.log('channelwatch', channelwatch)
 
-      if (channelwatch.length > 0) this.redis.watch(channelwatch) // also watch the channelmembers
+      if (channelwatch.length > 0) await this.redis.watch(channelwatch) // also watch the channelmembers
       // now we are sure they are for deletion start the multi
       const multi = this.redis.multi()
       const deletenotescreens = todelete2.map(
@@ -1190,126 +1187,110 @@ export class NoteScreenConnection {
       )
       multi.del(deletenotescreens) // delete the notescreens
       // now remove them for them lists of notescreens
-      multi.srem('lecture:' + args.lectureuuid + ':notescreens', todelete2)
+      multi.sRem('lecture:' + args.lectureuuid + ':notescreens', todelete2)
       // and from the channels
       if (channelwatch.length > 0)
         todelete2.forEach((notescreen) =>
           channelwatch.forEach((channel) => {
-            multi.lrem(channel, 0, notescreen)
+            multi.lRem(channel, 0, notescreen)
           })
         ) // everthings is queued now execute
-      const exec = promisify(multi.exec).bind(multi)
 
-      await exec()
+      await multi.exec()
     } catch (err) {
       console.log('cleanupNotescreen error ', err)
     }
   }
 
-  connectNotescreen(args) {
+  async connectNotescreen(args) {
     // console.log('connectnotepads', args)
     this.lastaccess(args.lectureuuid)
-    this.redis
-      .multi()
-      .sadd('lectures', args.lectureuuid)
-      .sadd('lecture:' + args.lectureuuid + ':notescreens', args.notescreenuuid)
-      .hmset(
-        'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
-        'purpose',
-        args.purpose,
-        'name',
-        args.name,
-        'active',
-        1,
-        'lastaccess',
-        Date.now()
-        /* todo may be we have to add an instance id */
-      )
-      .exec()
-    let push = 'lpush'
-    if (args.purpose === 'screen') push = 'rpush'
+    try {
+      await this.redis
+        .multi()
+        .sAdd('lectures', args.lectureuuid)
+        .sAdd(
+          'lecture:' + args.lectureuuid + ':notescreens',
+          args.notescreenuuid
+        )
+        .hSet(
+          'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
+          [
+            'purpose',
+            args.purpose,
+            'name',
+            args.name,
+            'active',
+            '1',
+            'lastaccess',
+            Date.now().toString()
+          ]
+          /* todo may be we have to add an instance id */
+        )
+        .exec()
+      let push = 'lPush'
+      if (args.purpose === 'screen') push = 'rPush'
 
-    this.redis.hget(
-      'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
-      'channel',
-      (err, res) => {
-        if (err) console.log('hget connectNotescreen err', err)
-        else {
-          //
-          let channel
-          if (res) {
-            channel = res
-            // console.log('already have channel', res)
-            this.redis
-              .multi()
-              .lrem(
-                'lecture:' +
-                  args.lectureuuid +
-                  ':channel:' +
-                  channel +
-                  ':members',
-                0,
-                args.notescreenuuid
-              )
-              [push](
-                'lecture:' +
-                  args.lectureuuid +
-                  ':channel:' +
-                  channel +
-                  ':members',
-                args.notescreenuuid
-              )
-              .exec(() => {
-                this.emitscreenlists(args)
-              }) // just in case, datastructures are broken
-          } else {
-            this.redis.lrange(
-              'lecture:' + args.lectureuuid + ':channels',
-              0,
-              1,
-              (err, res) => {
-                if (!err) channel = res[0]
-                // console.log('channel 1', channel)
-                if (!channel) {
-                  channel = this.addNewChannel(args, 'notebooks')
-                }
-                // console.log('channel 2', channel)
-                this.redis
-                  .multi()
-                  .hset(
-                    'lecture:' +
-                      args.lectureuuid +
-                      ':notescreen:' +
-                      args.notescreenuuid,
-                    'channel',
-                    channel
-                  )
-                  .lrem(
-                    'lecture:' +
-                      args.lectureuuid +
-                      ':channel:' +
-                      channel +
-                      ':members',
-                    0,
-                    args.notescreenuuid
-                  )
-                  [push](
-                    'lecture:' +
-                      args.lectureuuid +
-                      ':channel:' +
-                      channel +
-                      ':members',
-                    args.notescreenuuid
-                  )
-                  .exec(() => {
-                    this.emitscreenlists(args)
-                  })
-              }
-            )
-          }
+      const res = await this.redis.hGet(
+        'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
+        'channel'
+      )
+
+      let channel
+      if (res) {
+        channel = res
+        // console.log('already have channel', res)
+        await this.redis
+          .multi()
+          .lRem(
+            'lecture:' + args.lectureuuid + ':channel:' + channel + ':members',
+            0,
+            args.notescreenuuid
+          )
+          [push](
+            'lecture:' + args.lectureuuid + ':channel:' + channel + ':members',
+            args.notescreenuuid
+          )
+          .exec()
+        this.emitscreenlists(args)
+        // just in case, datastructures are broken
+      } else {
+        const lres = await this.redis.lRange(
+          'lecture:' + args.lectureuuid + ':channels',
+          0,
+          1
+        )
+        channel = lres[0]
+        // console.log('channel 1', channel)
+        if (!channel) {
+          channel = await this.addNewChannel(args, 'notebooks')
         }
+        // console.log('channel 2', channel)
+        await this.redis
+          .multi()
+          .hSet(
+            'lecture:' +
+              args.lectureuuid +
+              ':notescreen:' +
+              args.notescreenuuid,
+            ['channel', channel]
+          )
+          .lRem(
+            'lecture:' + args.lectureuuid + ':channel:' + channel + ':members',
+            0,
+            args.notescreenuuid
+          )
+          [push](
+            'lecture:' + args.lectureuuid + ':channel:' + channel + ':members',
+            args.notescreenuuid
+          )
+          .exec()
+        this.emitscreenlists(args)
       }
-    )
+    } catch (error) {
+      console.log('error in connect notescreen', error)
+      return false
+    }
 
     /*  if (this.connectednotepads>1) { // no more than one notepad allowed
         this.connectednotepads=1;
@@ -1318,63 +1299,61 @@ export class NoteScreenConnection {
     return true
   }
 
-  disconnectNotescreen(args) {
+  async disconnectNotescreen(args) {
     this.lastaccess(args.lectureuuid)
     // this.redis.srem("lecture:"+args.lectureuuid+":notescreens",0,args.notescreenuuid);
-    this.redis.hmset(
-      'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
-      'active',
-      0,
-      () => {
-        this.emitscreenlists(args)
-      }
-    ) // do not delete, a cleanup job will do this
+    try {
+      await this.redis.hSet(
+        'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
+        ['active', '0']
+      )
+      this.emitscreenlists(args)
+    } catch (error) {
+      // do not delete, a cleanup job will do this
+      console.log('error disconnectNotescreen', error)
+    }
   }
 
-  updateNotescreenActive(args) {
-    this.redis.hmset(
-      'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
-      'active',
-      1,
-      'lastaccess',
-      Date.now()
-    )
+  async updateNotescreenActive(args) {
+    try {
+      await this.redis.hSet(
+        'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
+        ['active', '1', 'lastaccess', Date.now().toString()]
+      )
+    } catch (error) {
+      console.log('error updateNotescreenActive', error)
+    }
   }
 
-  iterOverNotescreens(args, itfunc) {
-    this.redis.smembers(
-      'lecture:' + args.lectureuuid + ':notescreens',
-      function (err, res) {
-        if (err) console.log('smemebers errore iterover', err)
-        else if (res) {
-          res.forEach((item) => {
-            // console.log("iterOverNoteScreem res", res);
-            itfunc(item)
-          })
-        }
+  /*
+  async iterOverNotescreens(args, itfunc) {
+    try {
+      const res = await this.redis.smembers(
+        'lecture:' + args.lectureuuid + ':notescreens'
+      )
+      if (res) {
+        res.forEach((item) => {
+          // console.log("iterOverNoteScreem res", res);
+          itfunc(item)
+        })
       }
-    )
+    } catch (error) {
+      console.log('iterOverNotescreen error', error)
+    }
   }
+  */
 
   async getNoteScreens(args, funct) {
-    const client = this.redis
-    const smembers = promisify(this.redis.smembers).bind(client)
-    const hmget = promisify(this.redis.hmget).bind(client)
-
     try {
-      const screens = await smembers(
+      const screens = await this.redis.sMembers(
         'lecture:' + args.lectureuuid + ':notescreens'
       )
       // console.log('our screens', screens)
       const screenret = Promise.all(
         screens.map(async (el, ind) => {
-          const temp = await hmget(
+          const temp = await this.redis.hmGet(
             'lecture:' + args.lectureuuid + ':notescreen:' + el,
-            'name',
-            'purpose',
-            'channel',
-            'active',
-            'lastaccess'
+            ['name', 'purpose', 'channel', 'active', 'lastaccess']
           )
           return {
             name: temp[0],
@@ -1384,7 +1363,7 @@ export class NoteScreenConnection {
             lastaccess: temp[4],
             uuid: el
           }
-        })
+        }, this)
       )
       let toret = await screenret
       toret = toret.filter((el) =>
@@ -1400,16 +1379,12 @@ export class NoteScreenConnection {
   }
 
   async getPresentationinfo(args) {
-    const client = this.redis
-    const hmget = promisify(this.redis.hmget).bind(client)
-
     try {
-      let lectprop = hmget(
-        'lecture:' + args.lectureuuid,
+      let lectprop = this.redis.hmGet('lecture:' + args.lectureuuid, [
         'casttoscreens',
         'backgroundbw',
         'showscreennumber'
-      )
+      ])
       lectprop = await lectprop
       return {
         casttoscreens: lectprop[0] !== null ? lectprop[0] : 'false',
@@ -1423,25 +1398,20 @@ export class NoteScreenConnection {
   }
 
   async getChannelNoteScreens(args) {
-    const client = this.redis
-    const lrange = promisify(this.redis.lrange).bind(client)
-    const hmget = promisify(this.redis.hmget).bind(client)
-
     try {
-      let lectprop = hmget(
-        'lecture:' + args.lectureuuid,
+      let lectprop = this.redis.hmGet('lecture:' + args.lectureuuid, [
         'casttoscreens',
         'backgroundbw',
         'showscreennumber'
-      )
-      const channels = await lrange(
+      ])
+      const channels = await this.redis.lRange(
         'lecture:' + args.lectureuuid + ':channels',
         0,
         -1
       )
       // console.log("channels",channels);
       const channelret = channels.map((el) =>
-        lrange(
+        this.redis.lRange(
           'lecture:' + args.lectureuuid + ':channel:' + el + ':members',
           0,
           -1
@@ -1453,19 +1423,20 @@ export class NoteScreenConnection {
           const notescreenuuids = await el
           const channeluuid = channels[ind]
           const channelnotescreens = notescreenuuids.map(async (el2) => {
-            const details = hmget(
+            const details = this.redis.hmGet(
               'lecture:' + args.lectureuuid + ':notescreen:' + el2,
-              'active',
-              'name',
-              'purpose',
-              'channel',
-              'scrollheight',
-              'lastaccess'
+              [
+                'active',
+                'name',
+                'purpose',
+                'channel',
+                'scrollheight',
+                'lastaccess'
+              ]
             )
-            // console.log("details", await details);
             return Promise.all([el2, details])
-          })
-          const chandetail = hmget(
+          }, this)
+          const chandetail = this.redis.hmGet(
             'lecture:' + args.lectureuuid + ':channel:' + channeluuid,
             'type'
           )
@@ -1475,7 +1446,7 @@ export class NoteScreenConnection {
             Promise.all(channelnotescreens),
             chandetail
           ])
-        })
+        }, this)
       )
       const temp = await channeldet
       const toret = temp.map((el) => ({
@@ -1498,7 +1469,6 @@ export class NoteScreenConnection {
         type: el[2][0]
       }))
       lectprop = await lectprop
-      // console.log('channellayout', toret)
       return {
         channelinfo: toret,
         casttoscreens: lectprop[0],
@@ -1511,74 +1481,63 @@ export class NoteScreenConnection {
     }
   }
 
-  assignNoteScreenToChannel(args) {
+  async assignNoteScreenToChannel(args) {
     // console.log('assignNotePadToChannel', args)
     try {
       // TODO get content of old channel
-      this.redis.watch(
+      await this.redis.watch(
         'lecture:' + args.lectureuuid + ':assignable',
         'lecture:' +
           args.lectureuuid +
           ':channel:' +
           args.channeluuid +
-          ':members',
-        (error) => {
-          if (error) throw error
-          this.redis.hget(
-            'lecture:' +
-              args.lectureuuid +
-              ':notescreen:' +
-              args.notescreenuuid,
-            'channel',
-            (err, res) => {
-              if (err) throw err
-              const oldchanneluuid = res
-              this.redis.watch(
-                'lecture:' +
-                  args.lectureuuid +
-                  ':channel:' +
-                  oldchanneluuid +
-                  ':members'
-              )
-              this.redis
-                .multi()
-                .lrem(
-                  'lecture:' +
-                    args.lectureuuid +
-                    ':channel:' +
-                    oldchanneluuid +
-                    ':members',
-                  0,
-                  args.notescreenuuid
-                )
-                .rpush(
-                  'lecture:' +
-                    args.lectureuuid +
-                    ':channel:' +
-                    args.channeluuid +
-                    ':members',
-                  args.notescreenuuid
-                )
-                .hmset(
-                  'lecture:' +
-                    args.lectureuuid +
-                    ':notescreen:' +
-                    args.notescreenuuid,
-                  'channel',
-                  args.channeluuid,
-                  'active',
-                  1,
-                  'lastaccess',
-                  Date.now()
-                )
-                .exec((err, res) => {
-                  if (err) throw err
-                  this.emitscreenlists(args)
-                })
-            }
-          )
-        }
+          ':members'
       )
+
+      const res = await this.redis.hGet(
+        'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
+        'channel'
+      )
+      const oldchanneluuid = res
+      await this.redis.watch(
+        'lecture:' +
+          args.lectureuuid +
+          ':channel:' +
+          oldchanneluuid +
+          ':members'
+      )
+      await this.redis
+        .multi()
+        .lRem(
+          'lecture:' +
+            args.lectureuuid +
+            ':channel:' +
+            oldchanneluuid +
+            ':members',
+          0,
+          args.notescreenuuid
+        )
+        .rPush(
+          'lecture:' +
+            args.lectureuuid +
+            ':channel:' +
+            args.channeluuid +
+            ':members',
+          args.notescreenuuid
+        )
+        .hSet(
+          'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
+          [
+            'channel',
+            args.channeluuid,
+            'active',
+            1,
+            'lastaccess',
+            Date.now().toString()
+          ]
+        )
+        .exec()
+      this.emitscreenlists(args)
     } catch (error) {
       console.log('assignNotescreenToChannel', error)
     }
