@@ -219,13 +219,13 @@ export class NoteScreenConnection {
       function (cmd) {
         // console.log('notepad connected, send board data')
         this.sendBoardsToSocket(notepadscreenid.lectureuuid, socket)
-        socket.emit('drawcommand', {
+        /* socket.emit('drawcommand', {
           task: 'scrollBoard',
           time: dispatcher.getTime(),
           x: dispatcher.scrollx,
           y: dispatcher.scrolly,
           timeSet: true
-        })
+        }) */
       }.bind(this)
     )
 
@@ -910,7 +910,7 @@ export class NoteScreenConnection {
       if (
         lastwrite &&
         boardsavetime &&
-        lastwrite < boardsavetime + 10 * 60 * 1000
+        lastwrite < Number(boardsavetime) + 10 * 60 * 1000
       ) {
         lock.unlock()
         return
@@ -936,12 +936,17 @@ export class NoteScreenConnection {
       await Promise.all(redisprom) // ok wait that everything is transfered and then update the time
       if (boards.length > 0)
         await this.redis.sAdd('lecture:' + lectureuuid + ':boards', boards)
-      await this.redis.hSet('lecture:' + lectureuuid, [
-        'lastwrite',
-        boardsavetime && boardsavetime.toString(),
-        'backgroundbw',
-        backgroundbw && backgroundbw.toString()
-      ])
+      const hsetpara = []
+      if (boardsavetime) {
+        hsetpara.push('lastwrite')
+        hsetpara.push(boardsavetime.toString())
+      }
+      if (backgroundbw) {
+        hsetpara.push('backgroundbw')
+        hsetpara.push(backgroundbw.toString())
+      }
+      if (hsetpara.length > 0)
+        await this.redis.hSet('lecture:' + lectureuuid, hsetpara)
       console.log('loadLectFromDB successful for lecture', lectureuuid)
       lock.unlock()
     } catch (err) {
@@ -1120,8 +1125,11 @@ export class NoteScreenConnection {
       const allscreens = await this.redis.sMembers(
         'lecture:' + args.lectureuuid + ':notescreens'
       )
+      // console.log('allscreens', allscreens)
       // now we collect the active status of all member
-      let todelete = await Promise.all(
+      let todelete
+      if (!allscreens) return
+      todelete = await Promise.all(
         allscreens.map((el) => {
           // ok we got the uuid
           return Promise.all([
@@ -1136,7 +1144,7 @@ export class NoteScreenConnection {
       // console.log('todelete', todelete)
       todelete = todelete
         .filter((el) =>
-          el[1] ? Date.now() - el[1][1] > 20 * 60 * 1000 : false
+          el[1] ? Date.now() - Number(el[1][1]) > 20 * 60 * 1000 : false
         ) // inverted active condition
         .map((el) => el[0])
       // console.log('todelete filter', todelete)
@@ -1163,7 +1171,7 @@ export class NoteScreenConnection {
       )
       todelete2 = todelete2
         .filter((el) =>
-          el[1] ? Date.now() - el[1][1] > 20 * 60 * 1000 : false
+          el[1] ? Date.now() - Number(el[1][1]) > 20 * 60 * 1000 : false
         ) // inverted active condition
         .map((el) => el[0])
       if (todelete2.length === 0) return // we are ready
@@ -1368,7 +1376,8 @@ export class NoteScreenConnection {
       let toret = await screenret
       toret = toret.filter((el) =>
         el.lastaccess
-          ? Date.now() - el.lastaccess < 20 * 60 * 1000 && el.active !== '0'
+          ? Date.now() - Number(el.lastaccess) < 20 * 60 * 1000 &&
+            el.active !== '0'
           : false
       )
       return toret
@@ -1463,7 +1472,8 @@ export class NoteScreenConnection {
           })) // .forEach((el)=>(console.log("prefilter",el,el.active ? (el.active-Date.now()))< 20*60*1000 : false)))
           .filter((el) =>
             el.lastaccess
-              ? Date.now() - el.lastaccess < 20 * 60 * 1000 && el.active !== '0'
+              ? Date.now() - Number(el.lastaccess) < 20 * 60 * 1000 &&
+                el.active !== '0'
               : false
           ),
         type: el[2][0]
