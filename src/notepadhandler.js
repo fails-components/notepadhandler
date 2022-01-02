@@ -910,7 +910,7 @@ export class NoteScreenConnection {
       if (
         lastwrite &&
         boardsavetime &&
-        lastwrite < Number(boardsavetime) + 10 * 60 * 1000
+        Number(lastwrite) < Number(boardsavetime) + 10 * 60 * 1000
       ) {
         lock.unlock()
         return
