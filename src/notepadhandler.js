@@ -30,7 +30,7 @@ import { promisify } from 'util'
 import Redlock from 'redlock'
 import { randomBytes } from 'crypto'
 import { RedisRedlockProxy } from '@fails-components/security'
-import { commandOptions } from 'redis'
+import { commandOptions, WatchError } from 'redis'
 
 export class NoteScreenConnection {
   constructor(args) {
@@ -121,7 +121,8 @@ export class NoteScreenConnection {
       notescreenuuid: socket.decoded_token.notescreenuuid,
       purpose: 'notepad',
       user: socket.decoded_token.user,
-      name: socket.decoded_token.name
+      name: socket.decoded_token.name,
+      displayname: socket.decoded_token.user.displayname
     }
     this.cleanupNotescreens(notepadscreenid) // Cleanup
     // TODO
@@ -197,11 +198,13 @@ export class NoteScreenConnection {
     console.log('notepad connected, join room', notepadscreenid.roomname)
     if (notepadscreenid.roomname) socket.join(notepadscreenid.roomname)
 
-    {
+    const emittoken = async () => {
       const token = await this.getLectureToken(curtoken)
       curtoken = token.decoded
       socket.emit('authtoken', { token: token.token })
     }
+    emittoken()
+    this.emitCryptoIdent(socket, notepadscreenid)
 
     socket.on(
       'reauthor',
@@ -213,6 +216,67 @@ export class NoteScreenConnection {
         socket.emit('authtoken', { token: token.token })
       }.bind(this)
     )
+
+    socket.on('keyInfo', (cmd) => {
+      if (cmd.cryptKey && cmd.signKey) {
+        notepadscreenid.cryptKey = cmd.cryptKey
+        notepadscreenid.signKey = cmd.signKey
+        this.addUpdateCryptoIdent(notepadscreenid)
+      }
+    })
+
+    socket.on('keymasterQuery', () => {
+      this.handleKeymasterQuery(notepadscreenid)
+    })
+
+    socket.on('keymasterQueryResponse', (data) => {
+      this.handleKeymasterQueryResponse(notepadscreenid, data, socket)
+    })
+
+    socket.on('getKeyNum', async (callback) => {
+      try {
+        const keynum = await this.redis.hIncrBy(
+          'lecture:' + notepadscreenid.lectureuuid + ':keymaster',
+          'keynum',
+          '1'
+        )
+        callback({ keynum })
+      } catch (error) {
+        console.log('getKeyNum failed', error)
+        callback({ error: error })
+      }
+    })
+
+    socket.on('sendKey', async (data) => {
+      if (data.message && data.dest) {
+        try {
+          const dest = data.dest
+          const exists = await this.redis.hExists(
+            'lecture:' + notepadscreenid.lectureuuid + ':idents',
+            dest
+          )
+          // on check if the identity is inside our lecture, otherwise an attacker may be able to break out context
+          if (exists) {
+            const tosend = {
+              message: data.message,
+              signature: data.signature,
+              id: socket.id
+            }
+            if (data.purpose === 'notes') {
+              this.notesio.to(dest).emit('receiveKey', tosend)
+            } else if (data.purpose === 'lecture') {
+              this.notepadio.to(dest).emit('receiveKey', tosend)
+            } else if (data.purpose === 'screen') {
+              this.screenio.to(dest).emit('receiveKey', tosend)
+            }
+          } else {
+            console.log('Attempt to sendKey outside realm')
+          }
+        } catch (error) {
+          console.log('sendKey error', error)
+        }
+      }
+    })
 
     socket.on(
       'sendboards',
@@ -422,6 +486,7 @@ export class NoteScreenConnection {
       lectureuuid: socket.decoded_token.lectureuuid,
       notescreenuuid: socket.decoded_token.notescreenuuid,
       name: socket.decoded_token.name,
+      displayname: socket.decoded_token.user.displayname,
       purpose: 'screen',
       color: socket.decoded_token.color
     }
@@ -486,6 +551,18 @@ export class NoteScreenConnection {
       }.bind(this)
     )
 
+    socket.on('keyInfo', (cmd) => {
+      if (cmd.cryptKey && cmd.signKey) {
+        purescreen.cryptKey = cmd.cryptKey
+        purescreen.signKey = cmd.signKey
+        this.addUpdateCryptoIdent(purescreen)
+      }
+    })
+
+    socket.on('keymasterQuery', () => {
+      this.handleKeymasterQuery(purescreen)
+    })
+
     socket.on(
       'disconnect',
       function () {
@@ -518,7 +595,8 @@ export class NoteScreenConnection {
       purpose: 'screen',
       notepadhandler: this.notepadhandlerURL,
       maxrenew: maxrenew,
-      name: 'Created from lecture'
+      name: 'Created from lecture',
+      user: notepadscreenid.user
     }
     return await this.signScreenJwt(content)
   }
@@ -538,6 +616,7 @@ export class NoteScreenConnection {
 
   async getScreenToken(oldtoken) {
     const newtoken = {
+      user: oldtoken.user,
       lectureuuid: oldtoken.lectureuuid,
       notescreenuuid: oldtoken.notescreenuuid,
       purpose: 'screen', // in case a bug is there, no one should escape the realm
@@ -1074,25 +1153,9 @@ export class NoteScreenConnection {
       if (channeluuid === targetchanneluuid)
         console.log('tried to remove primary channel')
 
-      await this.redis.watch([
-        'lecture:' + args.lectureuuid + ':channel:' + channeluuid,
-        'lecture:' + args.lectureuuid + ':channel:' + channeluuid + ':members',
-        'lecture:' +
-          args.lectureuuid +
-          ':channel:' +
-          targetchanneluuid +
-          ':members',
-        'lecture:' + args.lectureuuid + ':channels'
-      ])
-
-      const memberslength = await this.redis.lLen(
-        'lecture:' + args.lectureuuid + ':channel:' + channeluuid + ':members'
-      )
-
-      const multi = this.redis.multi()
-
-      for (let i = 0; i < memberslength; i++)
-        multi.lMove(
+      await this.redis.executeIsolated(async (isoredis) => {
+        await isoredis.watch([
+          'lecture:' + args.lectureuuid + ':channel:' + channeluuid,
           'lecture:' +
             args.lectureuuid +
             ':channel:' +
@@ -1102,17 +1165,43 @@ export class NoteScreenConnection {
             args.lectureuuid +
             ':channel:' +
             targetchanneluuid +
-            ':members'
-        )
+            ':members',
+          'lecture:' + args.lectureuuid + ':channels'
+        ])
 
-      multi
-        .del(
+        const memberslength = await isoredis.lLen(
           'lecture:' + args.lectureuuid + ':channel:' + channeluuid + ':members'
         )
-        .lRem('lecture:' + args.lectureuuid + ':channels', 0, channeluuid)
-        .del('lecture:' + args.lectureuuid + ':channel:' + channeluuid)
 
-      await multi.exec()
+        const multi = isoredis.multi()
+
+        for (let i = 0; i < memberslength; i++)
+          multi.lMove(
+            'lecture:' +
+              args.lectureuuid +
+              ':channel:' +
+              channeluuid +
+              ':members',
+            'lecture:' +
+              args.lectureuuid +
+              ':channel:' +
+              targetchanneluuid +
+              ':members'
+          )
+
+        multi
+          .del(
+            'lecture:' +
+              args.lectureuuid +
+              ':channel:' +
+              channeluuid +
+              ':members'
+          )
+          .lRem('lecture:' + args.lectureuuid + ':channels', 0, channeluuid)
+          .del('lecture:' + args.lectureuuid + ':channel:' + channeluuid)
+
+        await multi.exec()
+      })
     } catch (error) {
       console.log('removeChannel error', error)
     }
@@ -1155,58 +1244,245 @@ export class NoteScreenConnection {
         (el) => 'lecture:' + args.lectureuuid + ':notescreen:' + el
       )
       // console.log('towatch', towatch)
-      await this.redis.watch(towatch)
+      await this.redis.executeIsolated(async (isoredis) => {
+        await isoredis.watch(towatch)
 
-      let todelete2 = await Promise.all(
-        todelete.map((el) => {
-          // ok we got the uuid
-          return Promise.all([
-            el,
-            this.redis.hmGet(
-              'lecture:' + args.lectureuuid + ':notescreen:' + el,
-              ['active', 'lastaccess']
-            )
-          ])
-        }, this)
-      )
-      todelete2 = todelete2
-        .filter((el) =>
-          el[1] ? Date.now() - Number(el[1][1]) > 20 * 60 * 1000 : false
-        ) // inverted active condition
-        .map((el) => el[0])
-      if (todelete2.length === 0) return // we are ready
+        let todelete2 = await Promise.all(
+          todelete.map((el) => {
+            // ok we got the uuid
+            return Promise.all([
+              el,
+              isoredis.hmGet(
+                'lecture:' + args.lectureuuid + ':notescreen:' + el,
+                ['active', 'lastaccess']
+              )
+            ])
+          }, this)
+        )
+        todelete2 = todelete2
+          .filter((el) =>
+            el[1] ? Date.now() - Number(el[1][1]) > 20 * 60 * 1000 : false
+          ) // inverted active condition
+          .map((el) => el[0])
+        if (todelete2.length === 0) return // we are ready
 
-      const channels = await this.redis.lRange(
-        'lecture:' + args.lectureuuid + ':channels',
-        0,
-        -1
-      )
+        const channels = await isoredis.lRange(
+          'lecture:' + args.lectureuuid + ':channels',
+          0,
+          -1
+        )
 
-      const channelwatch = channels.map(
-        (el) => 'lecture:' + args.lectureuuid + ':channel:' + el + ':members'
-      )
-      // console.log('channelwatch', channelwatch)
+        const channelwatch = channels.map(
+          (el) => 'lecture:' + args.lectureuuid + ':channel:' + el + ':members'
+        )
+        // console.log('channelwatch', channelwatch)
 
-      if (channelwatch.length > 0) await this.redis.watch(channelwatch) // also watch the channelmembers
-      // now we are sure they are for deletion start the multi
-      const multi = this.redis.multi()
-      const deletenotescreens = todelete2.map(
-        (el) => 'lecture:' + args.lectureuuid + ':notescreen:' + el
-      )
-      multi.del(deletenotescreens) // delete the notescreens
-      // now remove them for them lists of notescreens
-      multi.sRem('lecture:' + args.lectureuuid + ':notescreens', todelete2)
-      // and from the channels
-      if (channelwatch.length > 0)
-        todelete2.forEach((notescreen) =>
-          channelwatch.forEach((channel) => {
-            multi.lRem(channel, 0, notescreen)
-          })
-        ) // everthings is queued now execute
+        if (channelwatch.length > 0) await isoredis.watch(channelwatch) // also watch the channelmembers
+        // now we are sure they are for deletion start the multi
+        const multi = isoredis.multi()
+        const deletenotescreens = todelete2.map(
+          (el) => 'lecture:' + args.lectureuuid + ':notescreen:' + el
+        )
+        multi.del(deletenotescreens) // delete the notescreens
+        // now remove them for them lists of notescreens
+        multi.sRem('lecture:' + args.lectureuuid + ':notescreens', todelete2)
+        // and from the channels
+        if (channelwatch.length > 0)
+          todelete2.forEach((notescreen) =>
+            channelwatch.forEach((channel) => {
+              multi.lRem(channel, 0, notescreen)
+            })
+          ) // everthings is queued now execute
 
-      await multi.exec()
+        await multi.exec()
+      })
     } catch (err) {
       console.log('cleanupNotescreen error ', err)
+    }
+  }
+
+  async handleKeymasterQuery(args) {
+    const now = Date.now() / 1000
+    // ok, first we have to figure out if a query is already running
+    try {
+      await this.redis.executeIsolated(async (isoredis) => {
+        await isoredis.watch('lecture:' + args.lectureuuid + ':keymaster')
+        const queryInfo = await isoredis.hGet(
+          'lecture:' + args.lectureuuid + ':keymaster',
+          'queryTime'
+        )
+        /* console.log(
+          'query Info',
+          queryInfo,
+          now - Number(queryInfo),
+          now,
+          Number(queryInfo)
+        ) */
+
+        if (queryInfo && now - Number(queryInfo) < 15) {
+          // we have no key, so may be the kaymaster does not know that we exist
+          await this.addUpdateCryptoIdent(args)
+          return // do not spam the system with these queries 20 +10
+        }
+
+        const res = await isoredis
+          .multi()
+          .hSet('lecture:' + args.lectureuuid + ':keymaster', [
+            'queryTime',
+            now.toString(),
+            'bidding',
+            '0',
+            'master',
+            'none'
+          ])
+          .exec()
+        if (res !== null) {
+          const roomname = this.getRoomName(args.lectureuuid)
+          // start the bidding
+          this.notepadio.to(roomname).emit('keymasterQuery')
+        }
+      })
+    } catch (error) {
+      console.log('handleKeymasterQuery problem or multple attempts', error)
+    }
+  }
+
+  async handleKeymasterQueryResponse(args, data, socket) {
+    let now = Date.now() / 1000
+    args.keymaster = false
+    if (!data || !data.bidding) return
+    let repeat = true
+    let master = false
+    let mastertime = 0
+    while (repeat) {
+      repeat = false
+
+      try {
+        await this.redis.executeIsolated(async (isoredis) => {
+          await isoredis.watch('lecture:' + args.lectureuuid + ':keymaster')
+          const biddingInfo = await isoredis.hGetAll(
+            'lecture:' + args.lectureuuid + ':keymaster'
+          )
+          if (
+            Number(biddingInfo.bidding) >= data.bidding ||
+            args.socketid === biddingInfo.master ||
+            Number(biddingInfo.queryTime) + 5 < now
+          ) {
+            isoredis.unwatch()
+            return
+          }
+          /* console.log(
+            'before hSet',
+            args.lectureuuid,
+            'lecture:' + args.lectureuuid + ':keymaster',
+            data.bidding,
+            args.socketid
+          ) */
+          /* const multiret = */ await isoredis
+            .multi()
+            .hSet('lecture:' + args.lectureuuid + ':keymaster', [
+              'bidding',
+              data.bidding.toString(),
+              'master',
+              args.socketid.toString()
+            ])
+            .exec()
+          /*  console.log('master stuff', [
+            'bidding',
+            data.bidding.toString(),
+            'master',
+            args.socketid.toString()
+          ]) */
+          master = true
+          mastertime = Number(biddingInfo.queryTime) + 6
+        })
+      } catch (error) {
+        if (error instanceof WatchError) {
+          repeat = true
+          console.log('watch error')
+        } else {
+          console.log('error in handleKeymasterQueryResponse')
+        }
+      }
+    }
+
+    if (master) {
+      // console.log('I can be master', args.socketid)
+      now = Date.now() / 1000
+      if (mastertime - now > 0)
+        await new Promise(
+          (resolve) => setTimeout(resolve),
+          (mastertime - now) * 1000
+        )
+
+      const masterquery = await this.redis.hGet(
+        'lecture:' + args.lectureuuid + ':keymaster',
+        'master'
+      )
+      // console.log('pre emit keymasterQueryResponse', masterquery, args.socketid)
+      if (masterquery && masterquery === args.socketid) {
+        // console.log('I am master', args.socketid)
+        // console.log('emit keymasterQueryResponse', args.socketid)
+        socket.emit('keymasterQueryResponse', { keymaster: true })
+        args.keymaster = true
+      } else {
+        // console.log('I am not master', args.socketid)
+        socket.emit('keymasterQueryResponse', { keymaster: false })
+      }
+    } else {
+      // console.log('I am not master', args.socketid)
+      socket.emit('keymasterQueryResponse', { keymaster: false })
+    }
+  }
+
+  async emitCryptoIdent(socket, args) {
+    const allidents = await this.redis.hGetAll(
+      'lecture:' + args.lectureuuid + ':idents'
+    )
+    for (const id in allidents) {
+      allidents[id] = JSON.parse(allidents[id])
+    }
+    socket.emit('identList', allidents)
+  }
+
+  // sync changes to notes
+  async addUpdateCryptoIdent(args) {
+    const identity = {
+      signKey: args.signKey,
+      cryptKey: args.cryptKey,
+      displayname: args.displayname,
+      /* id: args.socketid, */
+      purpose: args.purpose,
+      lastaccess: Date.now().toString()
+    }
+    // Two things store it in redis until disconnect
+    const oldident = this.redis.hGet(
+      'lecture:' + args.lectureuuid + ':idents',
+      args.socketid.toString()
+    )
+    this.redis.hSet('lecture:' + args.lectureuuid + ':idents', [
+      args.socketid.toString(),
+      JSON.stringify(identity)
+    ])
+    let oldid = await oldident
+    if (oldid) oldid = JSON.parse(oldid)
+
+    // and inform about new/updated identity
+    const roomname = this.getRoomName(args.lectureuuid)
+
+    if (
+      oldid &&
+      identity.signKey === oldid.signKey &&
+      identity.cryptKey === oldid.cryptKey
+    ) {
+      this.notepadio.to(roomname).emit('identValidity', {
+        lastaccess: identity.lastaccess,
+        id: args.socketid
+      })
+    } else {
+      this.notepadio
+        .to(roomname)
+        .emit('identUpdate', { identity: identity, id: args.socketid })
     }
   }
 
@@ -1310,11 +1586,14 @@ export class NoteScreenConnection {
   async disconnectNotescreen(args) {
     this.lastaccess(args.lectureuuid)
     // this.redis.srem("lecture:"+args.lectureuuid+":notescreens",0,args.notescreenuuid);
+    const roomname = this.getRoomName(args.lectureuuid)
     try {
       await this.redis.hSet(
         'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
         ['active', '0']
       )
+      this.redis.hDel('lecture:' + args.lectureuuid + ':idents', args.socketid)
+      this.notepadio.to(roomname).emit('identDelete', { id: args.socketid })
       this.emitscreenlists(args)
     } catch (error) {
       // do not delete, a cleanup job will do this
@@ -1323,6 +1602,7 @@ export class NoteScreenConnection {
   }
 
   async updateNotescreenActive(args) {
+    this.addUpdateCryptoIdent(args)
     try {
       await this.redis.hSet(
         'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
@@ -1495,58 +1775,63 @@ export class NoteScreenConnection {
     // console.log('assignNotePadToChannel', args)
     try {
       // TODO get content of old channel
-      await this.redis.watch(
-        'lecture:' + args.lectureuuid + ':assignable',
-        'lecture:' +
-          args.lectureuuid +
-          ':channel:' +
-          args.channeluuid +
-          ':members'
-      )
-
-      const res = await this.redis.hGet(
-        'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
-        'channel'
-      )
-      const oldchanneluuid = res
-      await this.redis.watch(
-        'lecture:' +
-          args.lectureuuid +
-          ':channel:' +
-          oldchanneluuid +
-          ':members'
-      )
-      await this.redis
-        .multi()
-        .lRem(
-          'lecture:' +
-            args.lectureuuid +
-            ':channel:' +
-            oldchanneluuid +
-            ':members',
-          0,
-          args.notescreenuuid
-        )
-        .rPush(
+      await this.redis.executeIsolated(async (isoredis) => {
+        await isoredis.watch(
+          'lecture:' + args.lectureuuid + ':assignable',
           'lecture:' +
             args.lectureuuid +
             ':channel:' +
             args.channeluuid +
-            ':members',
-          args.notescreenuuid
+            ':members'
         )
-        .hSet(
+
+        const res = await isoredis.hGet(
           'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
-          [
-            'channel',
-            args.channeluuid,
-            'active',
-            1,
-            'lastaccess',
-            Date.now().toString()
-          ]
+          'channel'
         )
-        .exec()
+        const oldchanneluuid = res
+        await isoredis.watch(
+          'lecture:' +
+            args.lectureuuid +
+            ':channel:' +
+            oldchanneluuid +
+            ':members'
+        )
+        await isoredis
+          .multi()
+          .lRem(
+            'lecture:' +
+              args.lectureuuid +
+              ':channel:' +
+              oldchanneluuid +
+              ':members',
+            0,
+            args.notescreenuuid
+          )
+          .rPush(
+            'lecture:' +
+              args.lectureuuid +
+              ':channel:' +
+              args.channeluuid +
+              ':members',
+            args.notescreenuuid
+          )
+          .hSet(
+            'lecture:' +
+              args.lectureuuid +
+              ':notescreen:' +
+              args.notescreenuuid,
+            [
+              'channel',
+              args.channeluuid,
+              'active',
+              1,
+              'lastaccess',
+              Date.now().toString()
+            ]
+          )
+          .exec()
+      })
       this.emitscreenlists(args)
     } catch (error) {
       console.log('assignNotescreenToChannel', error)
