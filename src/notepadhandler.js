@@ -840,6 +840,12 @@ export class NoteScreenConnection {
         pollsalt,
         { EX: 10 * 60 /* 10 Minutes for polling */ }
       ) // after the pollsalt is gone, the poll is over!
+      this.redis.hSet('lecture:' + lectureuuid + ':pollstate', [
+        'command',
+        'startPoll',
+        'data',
+        JSON.stringify(poll)
+      ])
       this.notepadio.to(roomname).emit('startPoll', poll)
       this.notesio.to(roomname).emit('startPoll', poll)
     } catch (err) {
@@ -856,6 +862,7 @@ export class NoteScreenConnection {
       const res = data.result
         .filter((el) => /^[0-9a-zA-Z]{9}$/.test(el.id))
         .map((el) => ({ id: el.id, data: el.data, name: el.name }))
+      this.redis.del('lecture:' + lectureuuid + ':pollstate')
       this.notepadio
         .to(roomname)
         .emit('finishPoll', { id: data.pollid, result: res })
