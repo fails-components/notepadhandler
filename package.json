@@ -1,6 +1,6 @@
 {
   "name": "@fails-components/notepadhandler",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "description": "Supplies server side notepad handling",
   "author": "Marten Richter",
   "license": "AGPL-3.0-or-later",
@@ -44,7 +44,7 @@
   "dependencies": {
     "@fails-components/config": "^1.0.1",
     "@fails-components/data": "^1.0.1",
-    "@fails-components/security": "^1.0.1",
+    "@fails-components/security": "^1.0.2",
     "@socket.io/redis-adapter": "^7.1.0",
     "jsonwebtoken": "^8.5.1",
     "mongodb": "^3.7.3",
