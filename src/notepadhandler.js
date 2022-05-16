@@ -205,6 +205,7 @@ export class NoteScreenConnection {
     }
     emittoken()
     this.emitCryptoIdent(socket, notepadscreenid)
+    this.emitAVOffers(socket, notepadscreenid)
 
     socket.on(
       'reauthor',
@@ -276,6 +277,10 @@ export class NoteScreenConnection {
           console.log('sendKey error', error)
         }
       }
+    })
+
+    socket.on('avoffer', (cmd) => {
+      this.handleAVoffer(notepadscreenid, cmd)
     })
 
     socket.on(
@@ -521,6 +526,7 @@ export class NoteScreenConnection {
       curtoken = token.decoded
       socket.emit('authtoken', { token: token.token })
     }
+    this.emitAVOffers(socket, purescreen)
 
     socket.on(
       'reauthor',
@@ -1482,6 +1488,51 @@ export class NoteScreenConnection {
       this.notepadio
         .to(roomname)
         .emit('identUpdate', { identity: identity, id: args.socketid })
+    }
+  }
+
+  async emitAVOffers(socket, args) {
+    const alloffers = await this.redis.hGetAll(
+      'lecture:' + args.lectureuuid + ':avoffers'
+    )
+    const offers = []
+    for (const label in alloffers) {
+      const labels = label.split(':')
+      offers.push({
+        type: labels[0],
+        id: labels[1],
+        time: alloffers[label]
+      })
+    }
+    socket.emit('avofferList', { offers })
+  }
+
+  async handleAVoffer(args, cmd) {
+    // ok to things to do, inform the others about the offer
+    // and store the information in redis
+
+    if (cmd.type !== 'video' && cmd.type !== 'audio' && cmd.type !== 'screen') {
+      return
+    }
+
+    const roomname = this.getRoomName(args.lectureuuid)
+
+    const message = {
+      id: args.socketid,
+      type: cmd.type
+    }
+
+    this.notepadio.to(roomname).emit('avoffer', message)
+    this.screenio.to(roomname).emit('avoffer', message)
+    this.notesio.to(roomname).emit('avoffer', message)
+
+    try {
+      await this.redis.hSet('lecture:' + args.lectureuuid + ':avoffers', [
+        cmd.type + ':' + args.socketid,
+        Date.now().toString()
+      ])
+    } catch (error) {
+      console.log('problem in handleAVoffer', error)
     }
   }
 
