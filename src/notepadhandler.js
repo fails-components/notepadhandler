@@ -265,7 +265,10 @@ export class NoteScreenConnection {
             }
             if (data.purpose === 'notes') {
               this.notesio.to(dest).emit('receiveKey', tosend)
-            } else if (data.purpose === 'lecture') {
+            } else if (
+              data.purpose === 'notepad' ||
+              data.purpose === 'lecture'
+            ) {
               this.notepadio.to(dest).emit('receiveKey', tosend)
             } else if (data.purpose === 'screen') {
               this.screenio.to(dest).emit('receiveKey', tosend)
