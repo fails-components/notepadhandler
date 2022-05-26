@@ -1658,7 +1658,19 @@ export class NoteScreenConnection {
       proms.push(
         this.redis.hDel(
           'lecture:' + args.lectureuuid + ':avoffers',
-          args.socketid
+          'video:' + args.socketid
+        )
+      )
+      proms.push(
+        this.redis.hDel(
+          'lecture:' + args.lectureuuid + ':avoffers',
+          'audio:' + args.socketid
+        )
+      )
+      proms.push(
+        this.redis.hDel(
+          'lecture:' + args.lectureuuid + ':avoffers',
+          'screen:' + args.socketid
         )
       )
       this.notepadio.to(roomname).emit('identDelete', { id: args.socketid })
