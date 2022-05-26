@@ -28,7 +28,7 @@ import {
 import { v4 as uuidv4, validate as isUUID } from 'uuid'
 import { promisify } from 'util'
 import Redlock from 'redlock'
-import { randomBytes } from 'crypto'
+import { randomBytes, createHash } from 'crypto'
 import { RedisRedlockProxy } from '@fails-components/security'
 import { commandOptions, WatchError } from 'redis'
 
@@ -197,6 +197,15 @@ export class NoteScreenConnection {
     notepadscreenid.roomname = this.getRoomName(notepadscreenid.lectureuuid)
     console.log('notepad connected, join room', notepadscreenid.roomname)
     if (notepadscreenid.roomname) socket.join(notepadscreenid.roomname)
+
+    {
+      const messagehash = createHash('sha256')
+      const useruuid = socket.decoded_token.user.useruuid
+      // now we create a hash that can be used to identify a user, if and only if,
+      // access to this database is available and not between lectures!
+      messagehash.update(useruuid + notepadscreenid.lectureuuid)
+      notepadscreenid.userhash = messagehash.digest('hex')
+    }
 
     const emittoken = async () => {
       const token = await this.getLectureToken(curtoken)
@@ -529,6 +538,16 @@ export class NoteScreenConnection {
       curtoken = token.decoded
       socket.emit('authtoken', { token: token.token })
     }
+
+    {
+      const messagehash = createHash('sha256')
+      const useruuid = socket.decoded_token.user.useruuid
+      // now we create a hash that can be used to identify a user, if and only if,
+      // access to this database is available and not between lectures!
+      messagehash.update(useruuid + purescreen.lectureuuid)
+      purescreen.userhash = messagehash.digest('hex')
+    }
+
     this.emitAVOffers(socket, purescreen)
 
     socket.on(
@@ -1459,6 +1478,7 @@ export class NoteScreenConnection {
       signKey: args.signKey,
       cryptKey: args.cryptKey,
       displayname: args.displayname,
+      userhash: args.userhash,
       /* id: args.socketid, */
       purpose: args.purpose,
       lastaccess: Date.now().toString()
