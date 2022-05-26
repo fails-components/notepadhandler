@@ -1641,12 +1641,28 @@ export class NoteScreenConnection {
     // this.redis.srem("lecture:"+args.lectureuuid+":notescreens",0,args.notescreenuuid);
     const roomname = this.getRoomName(args.lectureuuid)
     try {
-      await this.redis.hSet(
-        'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
-        ['active', '0']
+      const proms = []
+      proms.push(
+        this.redis.hSet(
+          'lecture:' + args.lectureuuid + ':notescreen:' + args.notescreenuuid,
+          ['active', '0']
+        )
       )
-      this.redis.hDel('lecture:' + args.lectureuuid + ':idents', args.socketid)
+      proms.push(
+        this.redis.hDel(
+          'lecture:' + args.lectureuuid + ':idents',
+          args.socketid
+        )
+      )
+
+      proms.push(
+        this.redis.hDel(
+          'lecture:' + args.lectureuuid + ':avoffers',
+          args.socketid
+        )
+      )
       this.notepadio.to(roomname).emit('identDelete', { id: args.socketid })
+      await Promise.all(proms)
       this.emitscreenlists(args)
     } catch (error) {
       // do not delete, a cleanup job will do this
