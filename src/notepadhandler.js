@@ -224,6 +224,14 @@ export class NoteScreenConnection {
       socket.emit('authtoken', { token: token.token })
     })
 
+    socket.on('gettransportinfo', (cmd) => {
+      socket.emit('transportinfo', {
+        url: 'https://192.168.1.108:8081/avfails',
+        wsurl: 'ws://localhost:8081/avfails',
+        spki: 'FC:1A:17:5D:FB:41:16:B1:13:3A:EB:5B:0A:3C:EC:19:30:CF:CA:87:61:FD:42:11:C0:85:48:84:09:B7:84:16'
+      })
+    })
+
     socket.on('keyInfo', (cmd) => {
       if (cmd.cryptKey && cmd.signKey) {
         notepadscreenid.cryptKey = cmd.cryptKey
