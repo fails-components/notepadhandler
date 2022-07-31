@@ -129,8 +129,7 @@ export class NoteScreenConnection {
     /* this.getNoteScreens(notepadscreenid, ((screens)=>{
      socket.emit('availscreens',{screens: screens });
       })); */
-
-    await this.loadLectFromDB(notepadscreenid.lectureuuid)
+    const loadlectprom = this.loadLectFromDB(notepadscreenid.lectureuuid)
 
     let curtoken = socket.decoded_token
 
@@ -141,7 +140,8 @@ export class NoteScreenConnection {
         return new CallbackContainer(id, data)
       },
       {
-        writeData: function (obj, number, data, append) {
+        writeData: async (obj, number, data, append) => {
+          await loadlectprom
           obj.writeData(notepadscreenid.lectureuuid, number, data, append)
         },
         obj: this
@@ -216,16 +216,13 @@ export class NoteScreenConnection {
     this.emitCryptoIdent(socket, notepadscreenid)
     this.emitAVOffers(socket, notepadscreenid)
 
-    socket.on(
-      'reauthor',
-      async function () {
-        // we use the information from the already present authtoken
-        const token = await this.getLectureToken(curtoken)
-        curtoken = token.decoded
-        this.updateNotescreenActive(notepadscreenid)
-        socket.emit('authtoken', { token: token.token })
-      }.bind(this)
-    )
+    socket.on('reauthor', async () => {
+      // we use the information from the already present authtoken
+      const token = await this.getLectureToken(curtoken)
+      curtoken = token.decoded
+      this.updateNotescreenActive(notepadscreenid)
+      socket.emit('authtoken', { token: token.token })
+    })
 
     socket.on('keyInfo', (cmd) => {
       if (cmd.cryptKey && cmd.signKey) {
@@ -295,44 +292,36 @@ export class NoteScreenConnection {
       this.handleAVoffer(notepadscreenid, cmd)
     })
 
-    socket.on(
-      'sendboards',
-      function (cmd) {
-        // console.log('notepad connected, send board data')
-        this.sendBoardsToSocket(notepadscreenid.lectureuuid, socket)
-        /* socket.emit('drawcommand', {
+    socket.on('sendboards', async (cmd) => {
+      await loadlectprom
+      // console.log('notepad connected, send board data')
+      this.sendBoardsToSocket(notepadscreenid.lectureuuid, socket)
+      /* socket.emit('drawcommand', {
           task: 'scrollBoard',
           time: dispatcher.getTime(),
           x: dispatcher.scrollx,
           y: dispatcher.scrolly,
           timeSet: true
         }) */
-      }.bind(this)
-    )
+    })
 
-    socket.on(
-      'createscreen',
-      async function (callback) {
-        // ok we create the credentials for a new screen
-        const token = await this.createScreenForLecture(
-          notepadscreenid,
-          curtoken.maxrenew
-        ) // res contains token
-        callback({ token: token, screenurl: this.screenUrl })
-      }.bind(this)
-    )
+    socket.on('createscreen', async (callback) => {
+      // ok we create the credentials for a new screen
+      const token = await this.createScreenForLecture(
+        notepadscreenid,
+        curtoken.maxrenew
+      ) // res contains token
+      callback({ token: token, screenurl: this.screenUrl })
+    })
 
-    socket.on(
-      'createnotepad',
-      async function (callback) {
-        // ok we create the credentials for a new screen
-        const token = await this.createNotepadForLecture(
-          notepadscreenid,
-          curtoken.maxrenew
-        ) // res contains token
-        callback({ token: token, notepadurl: this.notepadUrl })
-      }.bind(this)
-    )
+    socket.on('createnotepad', async (callback) => {
+      // ok we create the credentials for a new screen
+      const token = await this.createNotepadForLecture(
+        notepadscreenid,
+        curtoken.maxrenew
+      ) // res contains token
+      callback({ token: token, notepadurl: this.notepadUrl })
+    })
 
     socket.on('createchannel', () => {
       // console.log('createchannel')
@@ -343,29 +332,25 @@ export class NoteScreenConnection {
       )
     })
 
-    socket.on(
-      'updatesizes',
-      function (cmd) {
-        // console.log('peek updatesizes', cmd)
+    socket.on('updatesizes', async (cmd) => {
+      await loadlectprom
+      console.log('peek updatesizes', cmd)
 
-        this.setLectureProperties(
-          notepadscreenid,
-          cmd.casttoscreens !== undefined
-            ? cmd.casttoscreens === true
-            : undefined,
-          cmd.backgroundbw !== undefined
-            ? cmd.backgroundbw === true
-            : undefined,
-          cmd.showscreennumber !== undefined
-            ? cmd.showscreennumber === true
-            : undefined
-        )
+      this.setLectureProperties(
+        notepadscreenid,
+        cmd.casttoscreens !== undefined
+          ? cmd.casttoscreens === true
+          : undefined,
+        cmd.backgroundbw !== undefined ? cmd.backgroundbw === true : undefined,
+        cmd.showscreennumber !== undefined
+          ? cmd.showscreennumber === true
+          : undefined
+      )
 
-        this.updateNoteScreen(notepadscreenid, cmd.scrollheight, 'notepad')
+      this.updateNoteScreen(notepadscreenid, cmd.scrollheight, 'notepad')
 
-        // if (notepadscreenid.roomname) this.emitscreenlists(args); // update Notescreen should do this
-      }.bind(this)
-    )
+      // if (notepadscreenid.roomname) this.emitscreenlists(args); // update Notescreen should do this
+    })
 
     socket.on('getAvailablePicts', async (callback) => {
       const pictinfo = await this.getAvailablePicts(notepadscreenid)
@@ -399,96 +384,81 @@ export class NoteScreenConnection {
       }
     })
 
-    socket.on(
-      'drawcommand',
-      async function (cmd) {
-        const delayed = false
+    socket.on('drawcommand', async (cmd) => {
+      await loadlectprom
+      if (notepadscreenid) {
+        networksource.receiveData(cmd)
+      }
+      // special handling
+      if (cmd.task === 'addPicture') {
         if (notepadscreenid) {
-          networksource.receiveData(cmd)
-        }
-        // special handling
-        if (cmd.task === 'addPicture') {
-          if (notepadscreenid) {
-            const pictinfo = await this.getPicture(notepadscreenid, cmd.uuid)
-            if (pictinfo) {
-              this.notepadio
-                .to(notepadscreenid.roomname)
-                .emit('pictureinfo', pictinfo)
-              this.screenio
-                .to(notepadscreenid.roomname)
-                .emit('pictureinfo', pictinfo)
-              this.notesio
-                .to(notepadscreenid.roomname)
-                .emit('pictureinfo', pictinfo)
-            }
+          const pictinfo = await this.getPicture(notepadscreenid, cmd.uuid)
+          if (pictinfo) {
+            this.notepadio
+              .to(notepadscreenid.roomname)
+              .emit('pictureinfo', pictinfo)
+            this.screenio
+              .to(notepadscreenid.roomname)
+              .emit('pictureinfo', pictinfo)
+            this.notesio
+              .to(notepadscreenid.roomname)
+              .emit('pictureinfo', pictinfo)
           }
         }
-        // generell distribution
-        if (notepadscreenid.roomname && !delayed) {
-          this.notepadio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
-          this.screenio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
-          this.notesio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
-        }
-      }.bind(this)
-    )
+      }
+      // generell distribution
+      if (notepadscreenid.roomname) {
+        this.notepadio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
+        this.screenio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
+        this.notesio.to(notepadscreenid.roomname).emit('drawcommand', cmd)
+      }
+    })
 
-    socket.on(
-      'FoG',
-      function (cmd) {
-        if (notepadscreenid.roomname) {
-          this.notepadio.to(notepadscreenid.roomname).emit('FoG', cmd)
-          this.screenio.to(notepadscreenid.roomname).emit('FoG', cmd)
-          this.notesio.to(notepadscreenid.roomname).emit('FoG', cmd)
-        }
-      }.bind(this)
-    )
+    socket.on('FoG', (cmd) => {
+      if (notepadscreenid.roomname) {
+        this.notepadio.to(notepadscreenid.roomname).emit('FoG', cmd)
+        this.screenio.to(notepadscreenid.roomname).emit('FoG', cmd)
+        this.notesio.to(notepadscreenid.roomname).emit('FoG', cmd)
+      }
+    })
 
-    socket.on(
-      'addnotescreentochannel',
-      function (cmd) {
-        // TODO new concept
-        // console.log('check addnotescreen cmd', cmd)
-        if (isUUID(cmd.notescreenuuid) && isUUID(cmd.channeluuid)) {
-          /* console.log(
+    socket.on('addnotescreentochannel', (cmd) => {
+      // TODO new concept
+      // console.log('check addnotescreen cmd', cmd)
+      if (isUUID(cmd.notescreenuuid) && isUUID(cmd.channeluuid)) {
+        /* console.log(
             'addnotescreentochannel',
             cmd.notescreenuuid,
             cmd.channeluuid
           ) */
-          this.assignNoteScreenToChannel({
-            channeluuid: cmd.channeluuid,
-            lectureuuid: notepadscreenid.lectureuuid,
-            notescreenuuid: cmd.notescreenuuid
-          })
-        }
-      }.bind(this)
-    )
+        this.assignNoteScreenToChannel({
+          channeluuid: cmd.channeluuid,
+          lectureuuid: notepadscreenid.lectureuuid,
+          notescreenuuid: cmd.notescreenuuid
+        })
+      }
+    })
 
-    socket.on(
-      'removechannel',
-      function (cmd) {
-        // console.log('removechannel', cmd)
-        if (isUUID(cmd.channeluuid)) {
-          // console.log('removechannel request', cmd.channeluuid)
-          this.removeChannel(notepadscreenid, cmd.channeluuid)
-        }
-      }.bind(this)
-    )
+    socket.on('removechannel', (cmd) => {
+      // console.log('removechannel', cmd)
+      if (isUUID(cmd.channeluuid)) {
+        // console.log('removechannel request', cmd.channeluuid)
+        this.removeChannel(notepadscreenid, cmd.channeluuid)
+      }
+    })
 
-    socket.on(
-      'disconnect',
-      function () {
-        console.log('Client %s with ip %s  disconnected', socket.id, address)
-        if (notepadscreenid.roomname) {
-          socket.leave(notepadscreenid.roomname)
-          notepadscreenid.roomname = null
-        }
-        if (notepadscreenid) {
-          // delete  notepadscreen.socket;
-          this.disconnectNotescreen(notepadscreenid)
-          // notepadscreenid=null;
-        }
-      }.bind(this)
-    )
+    socket.on('disconnect', () => {
+      console.log('Client %s with ip %s  disconnected', socket.id, address)
+      if (notepadscreenid.roomname) {
+        socket.leave(notepadscreenid.roomname)
+        notepadscreenid.roomname = null
+      }
+      if (notepadscreenid) {
+        // delete  notepadscreen.socket;
+        this.disconnectNotescreen(notepadscreenid)
+        // notepadscreenid=null;
+      }
+    })
   }
 
   async SocketHandlerScreen(socket) {
@@ -508,7 +478,7 @@ export class NoteScreenConnection {
       color: socket.decoded_token.color
     }
 
-    await this.loadLectFromDB(purescreen.lectureuuid)
+    const loadlectprom = this.loadLectFromDB(purescreen.lectureuuid)
 
     this.connectNotescreen(purescreen)
     // this.addScreen(purescreen);
@@ -521,23 +491,25 @@ export class NoteScreenConnection {
     this.getLectDetail(purescreen, socket)
 
     // console.log('screen send board data')
-    this.sendBoardsToSocket(purescreen.lectureuuid, socket)
+    loadlectprom.then(() => {
+      this.sendBoardsToSocket(purescreen.lectureuuid, socket)
+    })
     purescreen.roomname = this.getRoomName(purescreen.lectureuuid)
     /* console.log(
       'screen is connected to notepad, join room',
       purescreen.roomname
     ) */
-    socket.join(purescreen.roomname)
-
-    /* } else {
+    socket.join(purescreen.roomname)(
+      /* } else {
       console.log("screen unauthorized",socket.screendata);
       return;
     } */
-    {
-      const token = await this.getScreenToken(curtoken)
-      curtoken = token.decoded
-      socket.emit('authtoken', { token: token.token })
-    }
+      async () => {
+        const token = await this.getScreenToken(curtoken)
+        curtoken = token.decoded
+        socket.emit('authtoken', { token: token.token })
+      }
+    )()
 
     {
       const messagehash = createHash('sha256')
@@ -550,34 +522,29 @@ export class NoteScreenConnection {
 
     this.emitAVOffers(socket, purescreen)
 
-    socket.on(
-      'reauthor',
-      async function () {
-        // we use the information from the already present authtoken
-        const token = await this.getScreenToken(curtoken)
-        this.updateNotescreenActive(purescreen)
-        curtoken = token.decoded
-        socket.emit('authtoken', { token: token.token })
-      }.bind(this)
-    )
+    socket.on('reauthor', async () => {
+      // we use the information from the already present authtoken
+      const token = await this.getScreenToken(curtoken)
+      this.updateNotescreenActive(purescreen)
+      curtoken = token.decoded
+      socket.emit('authtoken', { token: token.token })
+    })
 
-    socket.on(
-      'updatesizes',
-      function (cmd) {
-        if (purescreen) {
-          this.updateNoteScreen(purescreen, cmd.scrollheight, 'screen')
+    socket.on('updatesizes', async (cmd) => {
+      await loadlectprom
+      if (purescreen) {
+        this.updateNoteScreen(purescreen, cmd.scrollheight, 'screen')
 
-          /* if (notepadscreen) {
+        /* if (notepadscreen) {
           var info=this.getSendSizes(notepadscreenid);
           if (purescreen.roomname) {
             notepadio.to(purescreen.roomname).emit('updatescreensizes',info);
             screenio.to(purescreen.roomname).emit('updatescreensizes',info);
           }
         } */
-          // todo send also to screens
-        }
-      }.bind(this)
-    )
+        // todo send also to screens
+      }
+    })
 
     socket.on('keyInfo', (cmd) => {
       if (cmd.cryptKey && cmd.signKey) {
@@ -591,29 +558,26 @@ export class NoteScreenConnection {
       this.handleKeymasterQuery(purescreen)
     })
 
-    socket.on(
-      'disconnect',
-      function () {
-        console.log(
-          'Screen Client %s with ip %s  disconnected',
-          socket.id,
-          address
-        )
-        if (purescreen) {
-          if (purescreen.roomname) {
-            socket.leave(purescreen.roomname)
-            // console.log('screen disconnected leave room', purescreen.roomname)
-            purescreen.roomname = null
-          }
-          /* if (purescreen.socketid) {
+    socket.on('disconnect', () => {
+      console.log(
+        'Screen Client %s with ip %s  disconnected',
+        socket.id,
+        address
+      )
+      if (purescreen) {
+        if (purescreen.roomname) {
+          socket.leave(purescreen.roomname)
+          // console.log('screen disconnected leave room', purescreen.roomname)
+          purescreen.roomname = null
+        }
+        /* if (purescreen.socketid) {
           purescreen.socketid = null;
         } */
-          // this.updatePurescreen(purescreen);
-        }
+        // this.updatePurescreen(purescreen);
+      }
 
-        this.disconnectNotescreen(purescreen)
-      }.bind(this)
-    )
+      this.disconnectNotescreen(purescreen)
+    })
   }
 
   async createScreenForLecture(notepadscreenid, maxrenew) {
@@ -1542,13 +1506,15 @@ export class NoteScreenConnection {
 
     const message = {
       id: args.socketid,
-      type: cmd.type
+      type: cmd.type,
+      db: cmd.db // loundness in case of audio
     }
 
     this.notepadio.to(roomname).emit('avoffer', message)
     this.screenio.to(roomname).emit('avoffer', message)
     this.notesio.to(roomname).emit('avoffer', message)
 
+    // we do not have to save the db value
     try {
       await this.redis.hSet('lecture:' + args.lectureuuid + ':avoffers', [
         cmd.type + ':' + args.socketid,
