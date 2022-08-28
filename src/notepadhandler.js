@@ -31,6 +31,7 @@ import Redlock from 'redlock'
 import { randomBytes, createHash } from 'crypto'
 import { RedisRedlockProxy } from '@fails-components/security'
 import { commandOptions, WatchError } from 'redis'
+import CIDRMatcher from 'cidr-matcher'
 
 export class NoteScreenConnection {
   constructor(args) {
@@ -43,6 +44,7 @@ export class NoteScreenConnection {
 
     this.signScreenJwt = args.signScreenJwt
     this.signNotepadJwt = args.signNotepadJwt
+    this.signAvsJwt = args.signAvsJwt
 
     this.screenUrl = args.screenUrl
     this.notepadUrl = args.notepadUrl
@@ -103,7 +105,9 @@ export class NoteScreenConnection {
 
   // fullnotepad lifecycle
   async SocketHandlerNotepad(socket) {
-    const address = socket.client.conn.remoteAddress
+    const address = socket.handshake.headers['x-forwarded-for']
+      .split(',')
+      .map((el) => el.trim()) || [socket.client.conn.remoteAddress]
     console.log('Client %s with ip %s  connected', socket.id, address)
     if (socket.decoded_token)
       console.log('Client username', socket.decoded_token.user.displayname)
@@ -225,10 +229,18 @@ export class NoteScreenConnection {
     })
 
     socket.on('gettransportinfo', (cmd) => {
-      socket.emit('transportinfo', {
-        url: 'https://192.168.1.108:8081/avfails',
-        wsurl: 'ws://localhost:8081/avfails',
-        spki: 'FC:1A:17:5D:FB:41:16:B1:13:3A:EB:5B:0A:3C:EC:19:30:CF:CA:87:61:FD:42:11:C0:85:48:84:09:B7:84:16'
+      let geopos
+      if (cmd && cmd.geopos && cmd.geopos.longitude && cmd.geopos.latitude)
+        geopos = {
+          longitude: cmd.geopos.longitude,
+          latitude: cmd.geopos.latitude
+        }
+      this.getTransportInfo(socket, {
+        ipaddress: address,
+        geopos,
+        lectureuuid: notepadscreenid.lectureuuid,
+        clientid: socket.id,
+        canWrite: true
       })
     })
 
@@ -470,7 +482,9 @@ export class NoteScreenConnection {
   }
 
   async SocketHandlerScreen(socket) {
-    const address = socket.client.conn.remoteAddress
+    const address = socket.handshake.headers['x-forwarded-for']
+      .split(',')
+      .map((el) => el.trim()) || [socket.client.conn.remoteAddress]
     console.log('Screen %s with ip %s  connected', socket.id, address)
     console.log('Screen name', socket.decoded_token.name)
     console.log('Screen uuid', socket.decoded_token.notescreenuuid)
@@ -673,6 +687,164 @@ export class NoteScreenConnection {
       console.log('redis problem in getNotepadToken', error)
     }
     return { token: await this.signNotepadJwt(newtoken), decoded: newtoken }
+  }
+
+  async getTransportInfo(socket, args) {
+    const regions = []
+    let router
+    let token = {}
+    try {
+      // iterate over all regions until something matches
+      const regioncol = this.mongo.collection('avsregion')
+      {
+        const regioncursorip = regioncol
+          .find({ ipfilter: { $exists: true } })
+          .project({ _id: 0, name: 1, hmac: 1, ipfilter: 1 })
+        await regioncursorip.forEach((el) => {
+          if (el.ipfilter) {
+            const matcher = new CIDRMatcher(el.ipfilter)
+            if (matcher.containsAny(args.ipaddress)) {
+              regions.push(el)
+            }
+          }
+        })
+      }
+      if (args.geopos) {
+        const regioncursorgeo = regioncol.aggregate([
+          {
+            $geoNear: {
+              near: args.geopos,
+              spherical: true,
+              key: 'geopos',
+              query: { geopos: { $exists: true } },
+              distanceField: 'dist.calculated'
+            }
+          }
+        ])
+        await regioncursorgeo.forEach((el) => {
+          if (el.geopos && !el.ipfilter) {
+            regions.push(el)
+          }
+        })
+      }
+      {
+        const remain = { ipfilter: { $exists: false } }
+        if (args.geopos) remain.geopos = { $exists: false }
+        const regioncursor = regioncol.find(remain)
+        await regioncursor.forEach((el) => {
+          if (!el.ipfilter) {
+            regions.push(el)
+          }
+        })
+      }
+      // we got our regions list, now we iterate over all regions until
+      // we find a suitable router
+
+      const routercol = this.mongo.collection('avsrouters')
+      let primary
+      let region
+      while (regions.length > 0 && !router) {
+        region = regions.shift()
+        primary = true
+        let cursor = routercol
+          .find({
+            region: { $eq: region.name },
+            $expr: { $gt: ['$maxClients', '$numClients'] },
+            primaryRealms: args.lectureuuid
+          })
+          .sort({ numClients: -1 })
+        if ((await cursor.count()) < 1) {
+          cursor.close()
+          primary = false
+          // go to secondary realm
+          cursor = routercol
+            .find({
+              region: { $eq: region.name },
+              $expr: { $gt: ['$maxClients', '$numClients'] },
+              clients: { $regex: args.lectureuuid + ':[a-zA-Z0-9-]+' }
+            })
+            .sort({ numClients: -1 })
+          if ((await cursor.count()) < 1) {
+            primary = false
+            cursor.close()
+            // last try, a new router
+            cursor = routercol
+              .find({
+                region: { $eq: region.name },
+                $and: [
+                  { $expr: { $gt: ['$maxClients', '$numClients'] } },
+                  { $expr: { $gt: ['$maxRealms', '$numRealms'] } }
+                ]
+              })
+              .sort({ maxRealms: -1, numClients: -1 })
+            if ((await cursor.count()) < 1) {
+              continue
+            }
+          }
+        }
+        router = await cursor.next()
+        cursor.close()
+      }
+      if (!router) {
+        socket.emit('transportinfo', {
+          error: 'no router found'
+        })
+        return
+      }
+
+      // ok we got a cursor...
+      // if it is not primary, we have to find out, if there is a primary
+      let setprimary = false
+      if (!primary) {
+        const dprimary = await routercol.findOne({
+          region: { $eq: region.name },
+          primaryRealms: args.lectureuuid
+        })
+        if (!dprimary) setprimary = true
+      }
+      const update = {
+        $addToSet: {
+          clients: args.lectureuuid + ':' + args.clientid
+        }
+      }
+      const calcHash = async (input) => {
+        const hash = createHash('sha256')
+        hash.update(input)
+        console.log('debug router info', router)
+        hash.update(router.hashSalt)
+        return hash.digest('base64')
+      }
+
+      const realmhash = calcHash(args.lectureuuid)
+      const clienthash = calcHash(args.clientid)
+      update.$set = {}
+      update.$set['transHash.' + (await realmhash)] = args.lectureuuid
+      update.$set['transHash.' + (await clienthash)] = args.clientid
+
+      if (setprimary) {
+        if (!update.$addToSet) update.$addToSet = {}
+        update.$addToSet.primaryRealms = args.lectureuuid
+      }
+
+      // todo hash table
+      token.accessRead = (await realmhash) + ':[a-zA-Z0-9-]+'
+      if (args.canWrite) token.accessWrite = token.accessRead
+      token.realm = await realmhash
+      token.client = await clienthash
+
+      await routercol.updateOne({ url: router.url }, update)
+    } catch (error) {
+      console.log('getTransportError', error)
+    }
+    token = this.signAvsJwt(token)
+
+    // perfect we have enough information to give the transport info back
+    socket.emit('transportinfo', {
+      url: router.url,
+      wsurl: router.wsurl,
+      spki: router.spki,
+      token: await token
+    })
   }
 
   async setLectureProperties(

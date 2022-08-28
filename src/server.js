@@ -76,6 +76,12 @@ const initServer = async () => {
     expiresIn: '10m',
     secret: cfg.getKeysSecret()
   })
+  const avssecurity = new FailsJWTSigner({
+    redis: redisclient,
+    type: 'avs',
+    expiresIn: '1m',
+    secret: cfg.getKeysSecret()
+  })
   const lectureverifier = new FailsJWTVerifier({
     redis: redisclient,
     type: 'lecture'
@@ -117,6 +123,7 @@ const initServer = async () => {
     notesio: notesio,
     signScreenJwt: screensecurity.signToken,
     signNotepadJwt: lecturesecurity.signToken,
+    signAvsJwt: avssecurity.signToken,
     getFileURL: assets.getFileURL,
     notepadhandlerURL: cfg.getURL('notepad'),
     screenUrl: cfg.getURL('web'),
