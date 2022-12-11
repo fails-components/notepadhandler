@@ -741,6 +741,7 @@ export class NoteScreenConnection {
         url: 1,
         region: 1,
         key: 1,
+        spki: 1,
         primaryRealms: { $elemMatch: { $eq: majorid } },
         hashSalt: 1,
         clients: { $elemMatch: { $eq: clientid } }
@@ -758,8 +759,9 @@ export class NoteScreenConnection {
           options
         )
       )
-      if (cmd.dir === 'out') {
-        // for 'in' we have all we need
+      if (cmd.dir === 'in') {
+        // this is the clients perspective, so what is coming in
+        // for 'out' we have all we need
         // now we need the router with the actual target client
         hops.push(
           routercol.findOne(
@@ -775,15 +777,24 @@ export class NoteScreenConnection {
         const last = await hops[1]
         // in this case we need two more routers
         if (!first) throw new Error('router not found')
-        if (!last) throw new Error('target client not found ' + clientid)
+        if (!last) {
+          console.log('target client not found ' + clientid)
+          callback({ notfound: clientid })
+          return
+        }
         let inspos = 1
-        // console.log('first debug', first)
+        // console.log('first debug', first, majorid)
         // console.log('last debug', last)
-        if (!first.clients) throw new Error('no client found')
-        if (!first.primaryRealms) throw new Error('no realm found')
+        if (!first.clients) first.clients = []
+        if (!first.primaryRealms) first.primaryRealms = []
+        if (!last.clients) last.clients = []
+        if (!last.primaryRealms) last.primaryRealms = []
         if (!first.clients.includes(clientid)) {
-          if (!first.primaryRealms.includes(majorid)) {
-            hops.insert(
+          if (
+            !first.primaryRealms.includes(majorid) &&
+            first.region !== last.region
+          ) {
+            hops.splice(
               inspos,
               0,
               routercol.findOne(
@@ -797,10 +808,10 @@ export class NoteScreenConnection {
             inspos++
           }
           if (
-            !last.primaryRealms.includes(majorid) &&
+            (!last.primaryRealms || !last.primaryRealms.includes(majorid)) &&
             first.region !== last.region
           ) {
-            hops.insert(
+            hops.splice(
               inspos,
               0,
               routercol.findOne(
@@ -838,6 +849,7 @@ export class NoteScreenConnection {
           }
           if (index < array.length - 1) {
             ret.next = array[index + 1].url
+            ret.nextspki = array[index + 1].spki
           }
           return { data: ret, key: ele.key }
         })
@@ -1030,16 +1042,16 @@ export class NoteScreenConnection {
       update.$set['transHash.' + (await realmhash)] = args.lectureuuid
       update.$set['transHash.' + (await clienthash)] = args.clientid
 
-      if (setprimary) {
-        if (!update.$addToSet) update.$addToSet = {}
-        update.$addToSet.primaryRealms = args.lectureuuid
-      }
-
       // todo hash table
       token.accessRead = [
         (await realmhash).replace(/[+/]/g, '\\$&') + ':[a-zA-Z0-9-/+=]+'
       ]
       if (args.canWrite) token.accessWrite = token.accessRead
+      if (setprimary) {
+        if (!update.$addToSet) update.$addToSet = {}
+        update.$addToSet.primaryRealms = args.lectureuuid
+      }
+      if (setprimary || primary) token.primaryRealm = await realmhash
       token.realm = await realmhash
       token.client = await clienthash
 
