@@ -744,7 +744,8 @@ export class NoteScreenConnection {
         spki: 1,
         primaryRealms: { $elemMatch: { $eq: majorid } },
         hashSalt: 1,
-        clients: { $elemMatch: { $eq: clientid } }
+        localClients: { $elemMatch: { $eq: clientid } },
+        remoteClients: { $elemMatch: { $eq: clientid } }
       }
     }
 
@@ -766,7 +767,7 @@ export class NoteScreenConnection {
         hops.push(
           routercol.findOne(
             {
-              clients: clientid
+              localClients: clientid
             },
             options
           )
@@ -785,11 +786,13 @@ export class NoteScreenConnection {
         let inspos = 1
         // console.log('first debug', first, majorid)
         // console.log('last debug', last)
-        if (!first.clients) first.clients = []
+        if (!first.localClients) first.localClients = []
+        if (!first.remoteClients) first.remoteClients = []
         if (!first.primaryRealms) first.primaryRealms = []
-        if (!last.clients) last.clients = []
+        if (!last.localClients) last.localClients = []
+        if (!last.primaryClients) last.primaryClients = []
         if (!last.primaryRealms) last.primaryRealms = []
-        if (!first.clients.includes(clientid)) {
+        if (!first.localClients.includes(clientid)) {
           if (
             !first.primaryRealms.includes(majorid) &&
             first.region !== last.region
@@ -982,7 +985,7 @@ export class NoteScreenConnection {
             .find({
               region: { $eq: region.name },
               $expr: { $gt: ['$maxClients', '$numClients'] },
-              clients: { $regex: args.lectureuuid + ':[a-zA-Z0-9-]+' }
+              localClients: { $regex: args.lectureuuid + ':[a-zA-Z0-9-]+' } // may be remoteClients
             })
             .sort({ numClients: -1 })
           if ((await cursor.count()) < 1) {
@@ -1025,7 +1028,7 @@ export class NoteScreenConnection {
       }
       const update = {
         $addToSet: {
-          clients: args.lectureuuid + ':' + args.clientid
+          localClients: args.lectureuuid + ':' + args.clientid
         }
       }
       const calcHash = async (input) => {
