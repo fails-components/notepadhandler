@@ -117,7 +117,8 @@ const initServer = async () => {
   const ioIns = new Server(server, {
     cors: cors,
     path: '/notepad.io',
-    serveClient: false
+    serveClient: false,
+    transports: ['websocket']
   })
 
   const notepadio = ioIns.of('/notepads')
