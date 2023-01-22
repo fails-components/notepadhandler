@@ -78,7 +78,8 @@ const initServer = async () => {
     dataurl: cfg.getURL('data'),
     webservertype: cfg.getWSType(),
     privateKey: cfg.getStatSecret(),
-    swift: cfg.getSwift()
+    swift: cfg.getSwift(),
+    s3: cfg.getS3()
   })
 
   const lecturesecurity = new FailsJWTSigner({
