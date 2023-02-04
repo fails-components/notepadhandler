@@ -120,6 +120,7 @@ export class NoteScreenConnection {
       socketid: socket.id,
       notescreenuuid: socket.decoded_token.notescreenuuid,
       purpose: 'notepad',
+      appversion: socket.decoded_token.appversion,
       user: socket.decoded_token.user,
       name: socket.decoded_token.name
     }
@@ -237,7 +238,10 @@ export class NoteScreenConnection {
           notepadscreenid,
           curtoken.maxrenew
         ) // res contains token
-        callback({ token: token, screenurl: this.screenUrl })
+        callback({
+          token: token,
+          screenurl: this.screenUrl[notepadscreenid.appversion]
+        })
       }.bind(this)
     )
 
@@ -249,7 +253,10 @@ export class NoteScreenConnection {
           notepadscreenid,
           curtoken.maxrenew
         ) // res contains token
-        callback({ token: token, notepadurl: this.notepadUrl })
+        callback({
+          token: token,
+          notepadurl: this.notepadUrl[notepadscreenid.appversion]
+        })
       }.bind(this)
     )
 
@@ -422,6 +429,7 @@ export class NoteScreenConnection {
       lectureuuid: socket.decoded_token.lectureuuid,
       notescreenuuid: socket.decoded_token.notescreenuuid,
       name: socket.decoded_token.name,
+      appversion: socket.decoded_token.appversion,
       purpose: 'screen',
       color: socket.decoded_token.color
     }
@@ -517,6 +525,7 @@ export class NoteScreenConnection {
       notescreenuuid: uuidv4(),
       purpose: 'screen',
       notepadhandler: this.notepadhandlerURL,
+      appversion: notepadscreenid.appversion,
       maxrenew: maxrenew,
       name: 'Created from lecture'
     }
@@ -531,6 +540,7 @@ export class NoteScreenConnection {
       name: 'Secondary Notebook',
       user: notepadscreenid.user,
       notepadhandler: this.notepadhandlerURL,
+      appversion: notepadscreenid.appversion,
       maxrenew: maxrenew
     }
     return await this.signNotepadJwt(content)
@@ -543,6 +553,7 @@ export class NoteScreenConnection {
       purpose: 'screen', // in case a bug is there, no one should escape the realm
       color: oldtoken.color,
       name: oldtoken.name,
+      appversion: oldtoken.appversion,
       notepadhandler: this.notepadhandlerURL,
       maxrenew: oldtoken.maxrenew - 1
     }
@@ -573,6 +584,7 @@ export class NoteScreenConnection {
       lectureuuid: oldtoken.lectureuuid,
       notescreenuuid: oldtoken.notescreenuuid,
       notepadhandler: this.notepadhandlerURL,
+      appversion: oldtoken.appversion,
       name: oldtoken.name,
       maxrenew: oldtoken.maxrenew - 1
     }

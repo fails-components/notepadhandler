@@ -128,6 +128,11 @@ const initServer = async () => {
 
   ioIns.adapter(createAdapter(redisclpub, redisclsub))
 
+  const targeturl = {
+    stable: cfg.getURL('web', 'stable'),
+    experimental: cfg.getURL('web', 'experimental')
+  }
+
   const nsconn = new NoteScreenConnection({
     redis: rediscl,
     mongo: mongodb,
@@ -138,9 +143,9 @@ const initServer = async () => {
     signNotepadJwt: lecturesecurity.signToken,
     getFileURL: assets.getFileURL,
     notepadhandlerURL: cfg.getURL('notepad'),
-    screenUrl: cfg.getURL('web'),
-    notepadUrl: cfg.getURL('web'),
-    notesUrl: cfg.getURL('web')
+    screenUrl: targeturl,
+    notepadUrl: targeturl,
+    notesUrl: targeturl
   })
 
   notepadio.use(lectureverifier.socketauthorize())
