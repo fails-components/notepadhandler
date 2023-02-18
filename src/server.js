@@ -34,16 +34,32 @@ const initServer = async () => {
   console.log('Starting notepadhandler')
   const cfg = new FailsConfig()
 
-  const redisclient = redis.createClient({
-    socket: { port: cfg.redisPort(), host: cfg.redisHost() },
-    password: cfg.redisPass()
-  })
+  let rediscl
+  let redisclusterconfig
+  if (cfg.getRedisClusterConfig)
+    redisclusterconfig = cfg.getRedisClusterConfig()
+  if (!redisclusterconfig) {
+    console.log(
+      'Connect to redis database with host:',
+      cfg.redisHost(),
+      'and port:',
+      cfg.redisPort()
+    )
+    rediscl = redis.createClient({
+      socket: { port: cfg.redisPort(), host: cfg.redisHost() },
+      password: cfg.redisPass()
+    })
+  } else {
+    // cluster case
+    console.log('Connect to redis cluster with config:', redisclusterconfig)
+    rediscl = redis.createCluster(redisclusterconfig)
+  }
 
-  await redisclient.connect()
+  await rediscl.connect()
   console.log('redisclient connected')
 
-  const redisclpub = redisclient.duplicate()
-  const redisclsub = redisclient.duplicate()
+  const redisclpub = rediscl.duplicate()
+  const redisclsub = rediscl.duplicate()
 
   await Promise.all([redisclpub.connect(), redisclsub.connect()])
 
@@ -61,17 +77,19 @@ const initServer = async () => {
     datadir: cfg.getDataDir(),
     dataurl: cfg.getURL('data'),
     webservertype: cfg.getWSType(),
-    privateKey: cfg.getStatSecret()
+    privateKey: cfg.getStatSecret(),
+    swift: cfg.getSwift(),
+    s3: cfg.getS3()
   })
 
   const lecturesecurity = new FailsJWTSigner({
-    redis: redisclient,
+    redis: rediscl,
     type: 'lecture',
     expiresIn: '10m',
     secret: cfg.getKeysSecret()
   })
   const screensecurity = new FailsJWTSigner({
-    redis: redisclient,
+    redis: rediscl,
     type: 'screen',
     expiresIn: '10m',
     secret: cfg.getKeysSecret()
@@ -83,11 +101,11 @@ const initServer = async () => {
     secret: cfg.getKeysSecret()
   })
   const lectureverifier = new FailsJWTVerifier({
-    redis: redisclient,
+    redis: rediscl,
     type: 'lecture'
   })
   const screenverifier = new FailsJWTVerifier({
-    redis: redisclient,
+    redis: rediscl,
     type: 'screen'
   })
 
@@ -106,7 +124,8 @@ const initServer = async () => {
   const ioIns = new Server(server, {
     cors: cors,
     path: '/notepad.io',
-    serveClient: false
+    serveClient: false,
+    transports: ['websocket']
   })
 
   const notepadio = ioIns.of('/notepads')
@@ -115,8 +134,13 @@ const initServer = async () => {
 
   ioIns.adapter(createAdapter(redisclpub, redisclsub))
 
+  const targeturl = {
+    stable: cfg.getURL('web', 'stable'),
+    experimental: cfg.getURL('web', 'experimental')
+  }
+
   const nsconn = new NoteScreenConnection({
-    redis: redisclient,
+    redis: rediscl,
     mongo: mongodb,
     notepadio: notepadio,
     screenio: screenio,
@@ -126,9 +150,9 @@ const initServer = async () => {
     signAvsJwt: avssecurity.signToken,
     getFileURL: assets.getFileURL,
     notepadhandlerURL: cfg.getURL('notepad'),
-    screenUrl: cfg.getURL('web'),
-    notepadUrl: cfg.getURL('web'),
-    notesUrl: cfg.getURL('web')
+    screenUrl: targeturl,
+    notepadUrl: targeturl,
+    notesUrl: targeturl
   })
 
   notepadio.use(lectureverifier.socketauthorize())
