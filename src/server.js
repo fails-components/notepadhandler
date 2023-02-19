@@ -95,7 +95,7 @@ const initServer = async () => {
     secret: cfg.getKeysSecret()
   })
   const avssecurity = new FailsJWTSigner({
-    redis: redisclient,
+    redis: rediscl,
     type: 'avs',
     expiresIn: '1m',
     secret: cfg.getKeysSecret()
