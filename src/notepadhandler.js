@@ -942,7 +942,7 @@ export class NoteScreenConnection {
             if (matcher.containsAny(args.ipaddress)) {
               regions.push(el)
             }
-          }
+          } else regions.push(el)
         })
       }
       if (args.geopos) {
