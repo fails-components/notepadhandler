@@ -222,7 +222,9 @@ export class NoteScreenConnection {
       curtoken = token.decoded
       socket.emit('authtoken', { token: token.token })
     }
-    emittoken()
+    emittoken().catch((error) => {
+      console.log('notepad emittoken problem', error)
+    })
     this.emitCryptoIdent(socket, notepadscreenid)
     this.emitAVOffers(socket, notepadscreenid)
 
@@ -566,17 +568,19 @@ export class NoteScreenConnection {
       'screen is connected to notepad, join room',
       purescreen.roomname
     ) */
-    socket.join(purescreen.roomname)(
-      /* } else {
+    socket.join(purescreen.roomname)
+    /* } else {
       console.log("screen unauthorized",socket.screendata);
       return;
     } */
-      async () => {
-        const token = await this.getScreenToken(curtoken)
-        curtoken = token.decoded
-        socket.emit('authtoken', { token: token.token })
-      }
-    )()
+    const emittoken = async () => {
+      const token = await this.getScreenToken(curtoken)
+      curtoken = token.decoded
+      socket.emit('authtoken', { token: token.token })
+    }
+    emittoken().catch((error) => {
+      console.log('notepad emittoken problem', error)
+    })
 
     {
       const messagehash = createHash('sha256')
