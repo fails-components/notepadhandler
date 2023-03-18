@@ -553,6 +553,10 @@ export class NoteScreenConnection {
     // this.addScreen(purescreen);
 
     let curtoken = socket.decoded_token
+    let routerres
+    let routerurl = new Promise((resolve) => {
+      routerres = resolve
+    })
 
     // console.log('screen connected')
 
@@ -615,6 +619,59 @@ export class NoteScreenConnection {
         } */
         // todo send also to screens
       }
+    })
+
+    socket.on('getrouting', async (cmd, callback) => {
+      if (
+        cmd &&
+        cmd.id &&
+        cmd.dir &&
+        cmd.dir === 'in' /* || cmd.dir === 'out' */ // a screen can only receive
+      ) {
+        try {
+          let toid
+          Promise.any([
+            routerurl,
+            new Promise((resolve, reject) => {
+              toid = setTimeout(reject, 20 * 1000)
+            })
+          ])
+          if (toid) clearTimeout(toid)
+          toid = undefined
+          this.getRouting(purescreen, cmd, await routerurl, callback)
+        } catch (error) {
+          callback({ error: 'getrouting: timeout or error: ' + error })
+        }
+      } else callback({ error: 'getrouting: malformed request' })
+    })
+
+    socket.on('gettransportinfo', (cmd, callback) => {
+      let geopos
+      if (cmd && cmd.geopos && cmd.geopos.longitude && cmd.geopos.latitude)
+        geopos = {
+          longitude: cmd.geopos.longitude,
+          latitude: cmd.geopos.latitude
+        }
+      this.getTransportInfo(
+        {
+          ipaddress: address,
+          geopos,
+          lectureuuid: purescreen.lectureuuid,
+          clientid: socket.id,
+          canWrite: false
+        },
+        (ret) => {
+          if (ret.url) {
+            if (routerres) {
+              const res = routerres
+              routerres = undefined
+              res(ret.url)
+            }
+            routerurl = ret.url
+          } else routerurl = undefined
+          callback(ret)
+        }
+      )
     })
 
     socket.on('keyInfo', (cmd) => {
