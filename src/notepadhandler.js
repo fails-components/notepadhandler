@@ -227,6 +227,7 @@ export class NoteScreenConnection extends CommonConnection {
     })
     this.emitCryptoIdent(socket, notepadscreenid)
     this.emitAVOffers(socket, notepadscreenid)
+    this.emitVideoquestions(socket, notepadscreenid)
 
     socket.on('reauthor', async () => {
       // we use the information from the already present authtoken
@@ -240,7 +241,7 @@ export class NoteScreenConnection extends CommonConnection {
       if (cmd && cmd.id && cmd.dir && (cmd.dir === 'in' || cmd.dir === 'out')) {
         try {
           let toid
-          Promise.any([
+          await Promise.any([
             routerurl,
             new Promise((resolve, reject) => {
               toid = setTimeout(reject, 20 * 1000)
@@ -351,7 +352,21 @@ export class NoteScreenConnection extends CommonConnection {
     })
 
     socket.on('avoffer', (cmd) => {
-      this.handleAVoffer(notepadscreenid, cmd)
+      this.handleAVoffer(notepadscreenid, cmd).catch((error) => {
+        console.log('Problem in handleAVoffer', error)
+      })
+    })
+
+    socket.on('allowvideoquestion', (cmd) => {
+      this.allowVideoQuestion(notepadscreenid, cmd).catch((error) => {
+        console.log('Problem in allowVideoQuestion', error)
+      })
+    })
+
+    socket.on('closevideoquestion', (cmd) => {
+      this.closeVideoQuestion(notepadscreenid, cmd).catch((error) => {
+        console.log('Problem in closeVideoQuestion', error)
+      })
     })
 
     socket.on('sendboards', async (cmd) => {
@@ -598,6 +613,7 @@ export class NoteScreenConnection extends CommonConnection {
     }
 
     this.emitAVOffers(socket, purescreen)
+    this.emitVideoquestions(socket, purescreen)
 
     socket.on('reauthor', async () => {
       // we use the information from the already present authtoken
@@ -1417,6 +1433,33 @@ export class NoteScreenConnection extends CommonConnection {
       ])
     } catch (error) {
       console.log('problem in handleAVoffer', error)
+    }
+  }
+
+  async allowVideoQuestion(args, cmd) {
+    if (!cmd.id) return // do not proceed without id.
+    const roomname = this.getRoomName(args.lectureuuid)
+
+    const message = {
+      id: cmd.id,
+      displayname: cmd.displayname,
+      userhash: args.userhash
+    }
+
+    this.notepadio.to(roomname).emit('videoquestion', message)
+    this.screenio.to(roomname).emit('videoquestion', message)
+    this.notesio.to(roomname).emit('videoquestion', message)
+
+    try {
+      await this.redis.hSet('lecture:' + args.lectureuuid + ':videoquestion', [
+        'permitted:' + cmd.id,
+        JSON.stringify({
+          displayname: args.displayname,
+          userhash: args.userhash
+        })
+      ])
+    } catch (error) {
+      console.log('problem in allowVideoQuestion', error)
     }
   }
 
