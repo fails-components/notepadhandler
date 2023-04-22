@@ -249,7 +249,7 @@ export class NoteScreenConnection extends CommonConnection {
           ])
           if (toid) clearTimeout(toid)
           toid = undefined
-          this.getRouting(notepadscreenid, cmd, await routerurl, callback)
+          await this.getRouting(notepadscreenid, cmd, await routerurl, callback)
         } catch (error) {
           callback({ error: 'getrouting: timeout or error: ' + error })
         }
