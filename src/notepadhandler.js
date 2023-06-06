@@ -417,7 +417,7 @@ export class NoteScreenConnection extends CommonConnection {
 
     socket.on('updatesizes', async (cmd) => {
       await loadlectprom
-      console.log('peek updatesizes', cmd)
+      // console.log('peek updatesizes', cmd)
 
       this.setLectureProperties(
         notepadscreenid,
