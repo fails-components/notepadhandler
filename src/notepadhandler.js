@@ -126,6 +126,7 @@ export class NoteScreenConnection extends CommonConnection {
       notescreenuuid: socket.decoded_token.notescreenuuid,
       purpose: 'notepad',
       appversion: socket.decoded_token.appversion,
+      features: socket.decoded_token.features,
       user: socket.decoded_token.user,
       name: socket.decoded_token.name,
       displayname: socket.decoded_token.user.displayname
@@ -560,6 +561,7 @@ export class NoteScreenConnection extends CommonConnection {
       name: socket.decoded_token.name,
       displayname: socket.decoded_token.user.displayname,
       appversion: socket.decoded_token.appversion,
+      features: socket.decoded_token.features,
       purpose: 'screen',
       color: socket.decoded_token.color
     }
@@ -735,6 +737,7 @@ export class NoteScreenConnection extends CommonConnection {
       purpose: 'screen',
       notepadhandler: this.notepadhandlerURL,
       appversion: notepadscreenid.appversion,
+      features: notepadscreenid.features,
       maxrenew: maxrenew,
       name: 'Created from lecture',
       user: notepadscreenid.user
@@ -751,6 +754,7 @@ export class NoteScreenConnection extends CommonConnection {
       user: notepadscreenid.user,
       notepadhandler: this.notepadhandlerURL,
       appversion: notepadscreenid.appversion,
+      features: notepadscreenid.features,
       maxrenew: maxrenew
     }
     return await this.signNotepadJwt(content)
@@ -765,6 +769,7 @@ export class NoteScreenConnection extends CommonConnection {
       color: oldtoken.color,
       name: oldtoken.name,
       appversion: oldtoken.appversion,
+      features: oldtoken.features,
       notepadhandler: this.notepadhandlerURL,
       maxrenew: oldtoken.maxrenew - 1
     }
@@ -796,6 +801,7 @@ export class NoteScreenConnection extends CommonConnection {
       notescreenuuid: oldtoken.notescreenuuid,
       notepadhandler: this.notepadhandlerURL,
       appversion: oldtoken.appversion,
+      features: oldtoken.features,
       name: oldtoken.name,
       maxrenew: oldtoken.maxrenew - 1
     }
