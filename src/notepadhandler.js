@@ -129,7 +129,8 @@ export class NoteScreenConnection extends CommonConnection {
       features: socket.decoded_token.features,
       user: socket.decoded_token.user,
       name: socket.decoded_token.name,
-      displayname: socket.decoded_token.user.displayname
+      displayname: socket.decoded_token.user.displayname,
+      screensharechannelid: undefined
     }
     this.cleanupNotescreens(notepadscreenid) // Cleanup
     // TODO
@@ -1423,8 +1424,26 @@ export class NoteScreenConnection extends CommonConnection {
 
     const message = {
       id: args.socketid,
-      type: cmd.type,
-      db: cmd.db // loundness in case of audio
+      type: cmd.type
+    }
+
+    if (cmd.db) {
+      message.db = cmd.db // loundness in case of audio
+    }
+    if (cmd.miScChg) {
+      message.miScChg = cmd.miScChg
+    }
+
+    if (cmd.type === 'screen') {
+      if (!args.screensharechannelid) {
+        // ok, we have to create a new channel
+        args.screensharechannelid = await this.addNewChannel(
+          args,
+          'screenshare',
+          true
+        )
+      }
+      message.channelid = args.screensharechannelid
     }
 
     this.notepadio.to(roomname).emit('avoffer', message)
@@ -1603,6 +1622,10 @@ export class NoteScreenConnection extends CommonConnection {
           'screen:' + args.socketid
         )
       )
+      // remove the screenshare channel
+      if (args.screensharechannelid) {
+        proms.push(this.removeChannel(args, args.screensharechannelid))
+      }
       this.notepadio.to(roomname).emit('identDelete', { id: args.socketid })
       await Promise.all(proms)
       this.emitscreenlists(args)
