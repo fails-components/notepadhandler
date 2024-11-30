@@ -125,7 +125,9 @@ const initServer = async () => {
     cors: cors,
     path: '/notepad.io',
     serveClient: false,
-    transports: ['websocket']
+    transports: ['websocket'],
+    pingInterval: 5000,
+    pingTimeout: 3000
   })
 
   const notepadio = ioIns.of('/notepads')
