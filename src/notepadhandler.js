@@ -42,6 +42,7 @@ export class NoteScreenConnection extends CommonConnection {
     this.screenio = args.screenio
     this.notesio = args.notesio
     this.getFileURL = args.getFileURL
+    this.saveFile = args.saveFile
 
     this.signScreenJwt = args.signScreenJwt
     this.signNotepadJwt = args.signNotepadJwt
@@ -442,6 +443,11 @@ export class NoteScreenConnection extends CommonConnection {
       callback(pictinfo)
     })
 
+    socket.on('getAvailableIpynbs', async (callback) => {
+      const ipynbinfo = await this.getAvailableIpynbs(notepadscreenid)
+      callback(ipynbinfo)
+    })
+
     socket.on('getPolls', async (callback) => {
       const polls = await this.getPolls(notepadscreenid)
       callback(polls)
@@ -469,6 +475,46 @@ export class NoteScreenConnection extends CommonConnection {
       }
     })
 
+    socket.on('switchAppMaster', async (cmd) => {
+      const masterCommand = { appletMaster: socket.id }
+      this.notepadio
+        .to(notepadscreenid.roomname)
+        .emit('switchAppMaster', masterCommand)
+      this.screenio
+        .to(notepadscreenid.roomname)
+        .emit('switchAppMaster', masterCommand)
+      this.notesio
+        .to(notepadscreenid.roomname)
+        .emit('switchAppMaster', masterCommand)
+    })
+
+    socket.on(
+      'uploadPicture',
+      async (name, type, picture, thumbnail, callback) => {
+        try {
+          if (typeof name !== 'string')
+            throw new Error('Type of name is not string')
+          if (
+            typeof type !== 'string' ||
+            !['image/jpeg', 'image/png'].includes(type)
+          )
+            throw new Error('Type of type is not string')
+          if (!Buffer.isBuffer(picture) || !Buffer.isBuffer(thumbnail))
+            throw new Error('Picture or thumbnail wrong type')
+          const { sha, tsha } = await this.uploadPicture(notepadscreenid, {
+            name,
+            type,
+            picture,
+            thumbnail
+          })
+          callback({ sha, tsha, name })
+        } catch (error) {
+          console.log('uploadPicture error', error)
+          callback({ error, name })
+        }
+      }
+    )
+
     socket.on('drawcommand', async (cmd) => {
       await loadlectprom
       if (notepadscreenid) {
@@ -489,6 +535,17 @@ export class NoteScreenConnection extends CommonConnection {
               .to(notepadscreenid.roomname)
               .emit('pictureinfo', pictinfo)
           }
+        }
+      }
+      if (cmd.task === 'startApp') {
+        const ipynbinfo = await this.getIpynb(notepadscreenid, cmd.id, cmd.sha)
+        if (ipynbinfo) {
+          const sendinfo = { ipynbs: ipynbinfo, appletMaster: socket.id }
+          this.notepadio
+            .to(notepadscreenid.roomname)
+            .emit('ipynbinfo', sendinfo)
+          this.screenio.to(notepadscreenid.roomname).emit('ipynbinfo', sendinfo)
+          this.notesio.to(notepadscreenid.roomname).emit('ipynbinfo', sendinfo)
         }
       }
       // generell distribution
@@ -901,6 +958,77 @@ export class NoteScreenConnection extends CommonConnection {
     }
   }
 
+  async getAvailableIpynbs(notepadscreenid) {
+    let lecturedoc = {}
+    try {
+      const lecturescol = this.mongo.collection('lectures')
+      lecturedoc = await lecturescol.findOne(
+        { uuid: notepadscreenid.lectureuuid },
+        {
+          projection: { _id: 0, ipynbs: 1 }
+        }
+      )
+
+      if (!lecturedoc.ipynbs) return []
+
+      return lecturedoc.ipynbs.map((el) => {
+        return {
+          name: el.name,
+          filename: el.filename,
+          note: el.note,
+          id: el.id,
+          sha: el.sha.buffer.toString('hex'),
+          mimetype: el.mimetype,
+          /* sha: el.sha.buffer.toString('hex'),  No download necessary ! */
+          applets: el.applets?.map?.((applet) => ({
+            appid: applet.appid,
+            appname: applet.appname
+          })),
+          url: this.getFileURL(el.sha.buffer, el.mimetype)
+        }
+      })
+      // ok now I have the ipynb, but I also have to generate the urls
+    } catch (err) {
+      console.log('error in getAvailableIpynbs', err)
+    }
+  }
+
+  async uploadPicture(notepadscreenid, { name, type, picture, thumbnail }) {
+    const picthash = createHash('sha256')
+    picthash.update(picture)
+    const thumbhash = createHash('sha256')
+    thumbhash.update(thumbnail)
+
+    const sha = picthash.digest()
+    const tsha = thumbhash.digest()
+
+    await Promise.all([
+      this.saveFile(picture, sha, type, picture.length),
+      this.saveFile(thumbnail, tsha, type, thumbnail.length)
+    ])
+
+    const lecturescol = this.mongo.collection('lectures')
+    await lecturescol.updateOne(
+      { uuid: notepadscreenid.lectureuuid },
+      {
+        $addToSet: {
+          usedpictures: {
+            name,
+            mimetype: type,
+            sha,
+            tsha
+          }
+        },
+        $currentDate: { lastaccess: true }
+      }
+    )
+
+    return {
+      sha: sha.toString('hex'),
+      tsha: tsha.toString('hex')
+    }
+  }
+
   async getPicture(notepadscreenid, id) {
     try {
       const lecturescol = this.mongo.collection('lectures')
@@ -919,7 +1047,7 @@ export class NoteScreenConnection extends CommonConnection {
       )
 
       if (findex === -1) {
-        if (!lecturedoc.pictures) throw new Error('No picture not found ' + id)
+        if (!lecturedoc.pictures) throw new Error('Pictures not found ' + id)
         // oh oh it is not found, but maybe it is available...
         const pindex = lecturedoc.pictures.findIndex(
           (el) => el.sha.buffer.toString('hex') === id
@@ -952,6 +1080,64 @@ export class NoteScreenConnection extends CommonConnection {
       console.log('error in getPicture', err)
     }
 
+    return null
+  }
+
+  async getIpynb(notepadscreenid, id, sha) {
+    try {
+      const lecturescol = this.mongo.collection('lectures')
+      // first figure out if it already is assigned to the lecture, we use here mongo db instead of the redis cache
+      const lecturedoc = await lecturescol.findOne(
+        { uuid: notepadscreenid.lectureuuid },
+        {
+          projection: { _id: 0, ipynbs: 1, usedipynbs: 1 }
+        }
+      )
+
+      if (!lecturedoc.usedipynbs) lecturedoc.usedipynbs = []
+
+      const findex = lecturedoc.usedipynbs.findIndex(
+        (el) => el.sha.buffer.toString('hex') === sha && el.id === id
+      )
+
+      if (findex === -1) {
+        if (!lecturedoc.ipynbs) throw new Error('No ipynbs found ' + id)
+        // oh oh it is not found, but maybe it is available...
+        const iindex = lecturedoc.ipynbs.findIndex(
+          (el) => el.sha.buffer.toString('hex') === sha && el.id === id
+        )
+        if (iindex === -1) {
+          throw new Error('Ipynb not found ' + id)
+        }
+        const iinfo = lecturedoc.ipynbs[iindex]
+        // and now move it to the used inpnbs....
+        lecturescol.updateOne(
+          { uuid: notepadscreenid.lectureuuid },
+          {
+            $addToSet: { usedipynbs: iinfo },
+            $currentDate: { lastaccess: true }
+          }
+        )
+        lecturedoc.usedipynbs.push(iinfo)
+      } // else pinfo = lecturedoc.usedpictures[findex]
+
+      return lecturedoc.usedipynbs.map((el) => {
+        return {
+          name: el.name,
+          note: el.note,
+          id: el.id,
+          mimetype: el.mimetype,
+          sha: el.sha.buffer.toString('hex'),
+          url: this.getFileURL(el.sha.buffer, el.mimetype),
+          applets: el.applets?.map?.((applet) => ({
+            appid: applet.appid,
+            appname: applet.appname
+          }))
+        }
+      }, this)
+    } catch (err) {
+      console.log('error in getIpynb', err)
+    }
     return null
   }
 

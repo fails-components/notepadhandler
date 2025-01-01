@@ -76,6 +76,7 @@ const initServer = async () => {
   const assets = new FailsAssets({
     datadir: cfg.getDataDir(),
     dataurl: cfg.getURL('data'),
+    savefile: cfg.getStatSaveType(),
     webservertype: cfg.getWSType(),
     privateKey: cfg.getStatSecret(),
     swift: cfg.getSwift(),
@@ -150,6 +151,7 @@ const initServer = async () => {
     signScreenJwt: screensecurity.signToken,
     signNotepadJwt: lecturesecurity.signToken,
     signAvsJwt: avssecurity.signToken,
+    saveFile: assets.saveFile,
     getFileURL: assets.getFileURL,
     notepadhandlerURL: cfg.getURL('notepad'),
     screenUrl: targeturl,
