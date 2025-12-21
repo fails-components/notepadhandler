@@ -372,6 +372,22 @@ export class NoteScreenConnection extends CommonConnection {
       })
     })
 
+    socket.on('chatquestion', (cmd) => {
+      if (cmd.text) {
+        const displayname = socket.decoded_token.user.displayname
+
+        this.notesio.to(notepadscreenid.roomname).emit('chatquestion', {
+          displayname: displayname,
+          text: cmd.text,
+          encData: cmd.encData,
+          keyindex: cmd.keyindex,
+          iv: cmd.iv,
+          resend: !!cmd.resend,
+          showSendername: !!cmd.showSendername
+        })
+      }
+    })
+
     socket.on('sendboards', async (cmd) => {
       await loadlectprom
       // console.log('notepad connected, send board data')
