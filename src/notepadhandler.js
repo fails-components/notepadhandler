@@ -228,6 +228,7 @@ export class NoteScreenConnection extends CommonConnection {
     emittoken().catch((error) => {
       console.log('notepad emittoken problem', error)
     })
+    socket.emit('userhash', notepadscreenid.userhash)
     this.emitCryptoIdent(socket, notepadscreenid)
     this.emitAVOffers(socket, notepadscreenid)
     this.emitVideoquestions(socket, notepadscreenid)
@@ -471,16 +472,47 @@ export class NoteScreenConnection extends CommonConnection {
 
     socket.on('startPoll', (cmd) => {
       if (
-        cmd.poll &&
-        cmd.poll.children &&
-        cmd.poll.children.length &&
-        cmd.poll.name &&
-        /^[0-9a-zA-Z]{9}$/.test(cmd.poll.id)
+        !(
+          cmd.poll &&
+          cmd.poll.children &&
+          cmd.poll.children.length &&
+          cmd.poll.name &&
+          /^[0-9a-zA-Z]{9}$/.test(cmd.poll.id)
+        )
       ) {
-        this.startPoll(notepadscreenid.lectureuuid, cmd.poll)
-      } else {
         console.log('received corrupt poll', cmd.poll)
+        return
       }
+      const poll = cmd.poll
+      const limited = !!cmd.limited
+      let participants
+      if (typeof cmd.participants !== 'undefined') {
+        if (!Array.isArray(cmd.participants)) {
+          console.log('poll participants is not an array')
+          return
+        }
+        console.log('partcipants peak', cmd.participants)
+        if (
+          cmd.participants.some(
+            (el) => typeof el !== 'string' || !/^[0-9a-zA-Z]+$/.test(el)
+          )
+        ) {
+          console.log('poll participant items are not userhash format')
+          return
+        }
+        participants = cmd.participants
+      } else {
+        if (limited) {
+          console.log('poll participants not set in limited poll')
+          return
+        }
+      }
+
+      this.startPoll(notepadscreenid.lectureuuid, {
+        poll,
+        limited,
+        participants
+      })
     })
 
     socket.on('finishPoll', (data) => {
@@ -1176,26 +1208,33 @@ export class NoteScreenConnection extends CommonConnection {
     }
   }
 
-  async startPoll(lectureuuid, poll) {
+  async startPoll(lectureuuid, { poll, limited, participants }) {
     const roomname = this.getRoomName(lectureuuid)
     // ok first thing, we have to create a salt and set it in redis!
     const randBytes = promisify(randomBytes)
 
     try {
       const pollsalt = (await randBytes(16)).toString('base64') // the salt is absolutely confidential, everyone who knows it can spoil secrecy of polling!
-      this.redis.set(
+      await this.redis.set(
         'pollsalt:lecture:' + lectureuuid + ':poll:' + poll.id,
         pollsalt,
         { EX: 10 * 60 /* 10 Minutes for polling */ }
       ) // after the pollsalt is gone, the poll is over!
-      this.redis.hSet('lecture:' + lectureuuid + ':pollstate', [
+      const pollstateCmd = [
         'command',
         'startPoll',
         'data',
-        JSON.stringify(poll)
-      ])
-      this.notepadio.to(roomname).emit('startPoll', poll)
-      this.notesio.to(roomname).emit('startPoll', poll)
+        JSON.stringify(poll),
+        'limited',
+        limited
+      ]
+      if (limited) {
+        pollstateCmd.push('participants', JSON.stringify(participants))
+      }
+      this.redis.hSet('lecture:' + lectureuuid + ':pollstate', pollstateCmd)
+
+      this.notepadio.to(roomname).emit('startPoll', { ...poll, participants }) // overwrite participants
+      this.notesio.to(roomname).emit('startPoll', { ...poll, participants })
     } catch (err) {
       console.log('error in startpoll', err)
     }
@@ -1207,13 +1246,21 @@ export class NoteScreenConnection extends CommonConnection {
 
     try {
       this.redis.del('pollsalt:lecture:' + lectureuuid + ':poll:' + data.pollid) // after the pollsalt is gone, the poll is over!
+      const parti = await this.redis.hGet(
+        'lecture:' + lectureuuid + ':pollstate',
+        'participants'
+      )
+      let participants
+      if (!parti) {
+        participants = JSON.parse(parti)
+      }
       const res = data.result
         .filter((el) => /^[0-9a-zA-Z]{9}$/.test(el.id))
         .map((el) => ({ id: el.id, data: el.data, name: el.name }))
       this.redis.del('lecture:' + lectureuuid + ':pollstate')
       this.notepadio
         .to(roomname)
-        .emit('finishPoll', { id: data.pollid, result: res })
+        .emit('finishPoll', { id: data.pollid, result: res, participants })
       this.notesio
         .to(roomname)
         .emit('finishPoll', { id: data.pollid, result: res })
